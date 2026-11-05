@@ -126,8 +126,16 @@ def get_cached_screener_data(syms, tf, h_prox, l_prox):
     return fetch_and_screen(syms, timeframe=tf, high_proximity_pct=h_prox, low_proximity_pct=l_prox)
 
 
-# Header & Market Status
-now_ist = datetime.datetime.now()
+# Header & Market Status (Explicitly in Indian Standard Time - IST)
+try:
+    from zoneinfo import ZoneInfo
+    ist_tz = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.datetime.now(ist_tz)
+except Exception:
+    import pytz
+    ist_tz = pytz.timezone("Asia/Kolkata")
+    now_ist = datetime.datetime.now(ist_tz)
+
 market_open = (
     now_ist.weekday() < 5 and 
     datetime.time(9, 15) <= now_ist.time() <= datetime.time(15, 30)
@@ -144,7 +152,7 @@ with col_time:
     st.markdown(f"""
         <div style="text-align: right; padding-top: 10px;">
             <span style="font-weight: 700; color: {status_color}; font-size: 15px;">{status_text}</span><br>
-            <span style="color: #9aa0a6; font-size: 13px;">Local Time: {now_ist.strftime('%d-%b-%Y %H:%M:%S')}</span>
+            <span style="color: #9aa0a6; font-size: 13px;">IST Time: {now_ist.strftime('%d-%b-%Y %H:%M:%S')}</span>
         </div>
     """, unsafe_allow_html=True)
 

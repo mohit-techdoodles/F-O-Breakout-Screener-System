@@ -89,8 +89,12 @@ def fetch_and_screen(
         if len(dates) < 2:
             continue
 
-        # Check if today is the active market day
-        today_date = datetime.date.today()
+        # Check if today is the active market day (IST)
+        try:
+            from zoneinfo import ZoneInfo
+            today_date = datetime.datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        except Exception:
+            today_date = datetime.date.today()
         if dates[-1] == today_date:
             curr_date = dates[-1]
             prev_date = dates[-2]
