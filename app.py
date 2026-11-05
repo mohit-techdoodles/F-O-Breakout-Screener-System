@@ -4,6 +4,7 @@ Streamlit Application
 """
 
 import datetime
+import inspect
 import time
 import pandas as pd
 import streamlit as st
@@ -11,6 +12,13 @@ import streamlit as st
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
 from screener_engine import fetch_and_screen, get_single_stock_chart_data
 from chart_utils import create_breakout_chart
+
+def get_width_kw(fn):
+    """Seamlessly handles Streamlit's transition from use_container_width=True to width='stretch'"""
+    try:
+        return {"width": "stretch"} if "width" in inspect.signature(fn).parameters else {"use_container_width": True}
+    except Exception:
+        return {"use_container_width": True}
 
 # Page configuration
 st.set_page_config(
@@ -118,7 +126,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Live Refresh")
 auto_refresh = st.sidebar.selectbox("Auto Refresh Interval", ["Off", "30 Seconds", "60 Seconds", "120 Seconds"], index=0)
 
-refresh_clicked = st.sidebar.button("🔄 Scan Now", use_container_width=True)
+refresh_clicked = st.sidebar.button("🔄 Scan Now", **get_width_kw(st.button))
 
 # Helper function to cache screening data (cached for 60 seconds)
 @st.cache_data(ttl=60, show_spinner=False)
@@ -263,7 +271,7 @@ with tab1:
         
         st.dataframe(
             styler,
-            use_container_width=True,
+            **get_width_kw(st.dataframe),
             hide_index=True
         )
 
@@ -314,7 +322,7 @@ with tab2:
         
         st.dataframe(
             styler,
-            use_container_width=True,
+            **get_width_kw(st.dataframe),
             hide_index=True
         )
 
@@ -352,7 +360,7 @@ with tab3:
             l52=stock_row["52W_Low"],
             ltp=stock_row["LTP"]
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, **get_width_kw(st.plotly_chart))
         
         # Summary details below chart
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -391,7 +399,7 @@ with tab4:
             "Dist_52W_High%": "{:+.2f}%",
             "52W_Low": "₹{:.2f}"
         }),
-        use_container_width=True,
+        **get_width_kw(st.dataframe),
         hide_index=True
     )
 
