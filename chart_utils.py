@@ -1,5 +1,5 @@
 """
-Interactive Plotly Chart with Candlesticks, Volume Profile, CPR, Camarilla & 52W Extremes
+Interactive Plotly Chart with Candlesticks, Volume Profile, CPR, Camarilla & Bollinger Bands
 """
 
 from typing import Optional
@@ -18,7 +18,8 @@ def create_breakout_chart(
     l52: float,
     ltp: float,
     cpr: Optional[dict] = None,
-    cam: Optional[dict] = None
+    cam: Optional[dict] = None,
+    bb: Optional[dict] = None
 ) -> go.Figure:
     """
     Renders an institutional-grade Candlestick chart with:
@@ -28,6 +29,7 @@ def create_breakout_chart(
     - PD_VAL (Red Dashed Line)
     - CPR Zone (Cyan / Blue Lines)
     - Camarilla H4 / L4 (Orange / Purple Breakout Levels)
+    - Bollinger Bands (Upper, SMA20, Lower)
     - 52W High and 95% threshold line
     - Volume bars at the bottom
     """
@@ -167,6 +169,45 @@ def create_breakout_chart(
                 row=1, col=1
             )
 
+    # Bollinger Bands
+    if bb:
+        bb_upper = bb.get("upper")
+        bb_lower = bb.get("lower")
+        bb_mid = bb.get("sma20")
+        if bb_upper and not np.isnan(bb_upper):
+            fig.add_hline(
+                y=bb_upper,
+                line_dash="dash",
+                line_color="#4FC3F7",
+                line_width=1.0,
+                annotation_text=f"BB Upper (₹{bb_upper})",
+                annotation_position="top left",
+                annotation_font=dict(color="#4FC3F7", size=9),
+                row=1, col=1
+            )
+        if bb_mid and not np.isnan(bb_mid):
+            fig.add_hline(
+                y=bb_mid,
+                line_dash="dot",
+                line_color="#FFA726",
+                line_width=1.0,
+                annotation_text=f"BB SMA20 (₹{bb_mid})",
+                annotation_position="left",
+                annotation_font=dict(color="#FFA726", size=9),
+                row=1, col=1
+            )
+        if bb_lower and not np.isnan(bb_lower):
+            fig.add_hline(
+                y=bb_lower,
+                line_dash="dash",
+                line_color="#4FC3F7",
+                line_width=1.0,
+                annotation_text=f"BB Lower (₹{bb_lower})",
+                annotation_position="bottom left",
+                annotation_font=dict(color="#4FC3F7", size=9),
+                row=1, col=1
+            )
+
     # 52W High threshold (95% level)
     if h52 and not np.isnan(h52):
         h52_trigger = h52 * 0.95
@@ -183,10 +224,10 @@ def create_breakout_chart(
 
     # Layout styling (Dark terminal theme)
     fig.update_layout(
-        title=f"<b>{symbol}</b> — Intraday Price, Volume Profile, CPR & Camarilla (LTP: ₹{ltp:.2f})",
+        title=f"<b>{symbol}</b> — Intraday Price, Volume Profile, CPR, Camarilla & Bollinger Bands (LTP: ₹{ltp:.2f})",
         template="plotly_dark",
         xaxis_rangeslider_visible=False,
-        height=640,
+        height=660,
         margin=dict(l=40, r=60, t=50, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )

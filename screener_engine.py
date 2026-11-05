@@ -1,7 +1,12 @@
 """
 Core Screener Engine: Data Pipeline & Vectorized Trigger Logic
 Implements Setup A (Bullish Breakout) & Setup B (Bearish Breakdown)
-Enhanced with CPR (Central Pivot Range / Money Zone) & Camarilla Pivots (H4/L4)
+Enhanced with:
+1. Volume Profile (VAH / VAL 70% Value Area)
+2. Trailing 52-Week Extremes
+3. CPR (Central Pivot Range / Money Zone)
+4. Camarilla Pivots (H4/L4 & H3/L3)
+5. Bollinger Bands Squeeze & Volatility Breakout (20 SMA, 2.0 StdDev, 120 Lookback)
 """
 
 import datetime
@@ -12,6 +17,7 @@ import yfinance as yf
 
 from fo_stocks import get_yf_symbol
 from volume_profile import calculate_volume_profile, get_profile_histogram
+from bollinger_screener import calculate_bollinger_bands
 
 
 def fetch_and_screen(
@@ -20,14 +26,15 @@ def fetch_and_screen(
     high_proximity_pct: float = 0.95,
     low_proximity_pct: float = 1.05,
     enable_cpr_filter: bool = True,
-    camarilla_filter: str = "None"
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, str]]:
+    camarilla_filter: str = "None",
+    bollinger_filter: str = "None"
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
     Downloads intraday and 52-week data in batch, computes Volume Profile,
-    Central Pivot Range (CPR), and Camarilla Pivots.
+    Central Pivot Range (CPR), Camarilla Pivots, and Bollinger Bands Squeeze.
     
     Screens for Bullish Breakout and Bearish Breakdown triggers with
-    Money Zone / CPR & Camarilla confluence.
+    multi-confluence validation.
     
     Returns:
     - (all_df, bullish_df, bearish_df, meta_info)
@@ -39,7 +46,7 @@ def fetch_and_screen(
     yf_tickers = [get_yf_symbol(s) for s in symbols]
     ticker_to_sym = {get_yf_symbol(s): s for s in symbols}
 
-    # 1. Batch download 1-year daily data for 52W High & 52W Low
+    # 1. Batch download 1-year daily data for 52W High & 52W Low & Bollinger Bands
     try:
         df_1y = yf.download(
             yf_tickers,
@@ -124,9 +131,10 @@ def fetch_and_screen(
         if np.isnan(vp["PD_VAH"]) or np.isnan(vp["PD_VAL"]):
             continue
 
-        # Extract 52-Week High and Low from daily data
+        # Extract 52-Week High/Low and compute Bollinger Bands from daily data
         h52 = np.nan
         l52 = np.nan
+        sub_1y = pd.DataFrame()
         try:
             if is_single_ticker:
                 sub_1y = df_1y.dropna(how="all")
@@ -146,6 +154,9 @@ def fetch_and_screen(
             h52 = vp["Day_High"] * 1.10
         if np.isnan(l52) or l52 <= 0:
             l52 = vp["Day_Low"] * 0.90
+
+        # Bollinger Bands & Squeeze calculation
+        bb_info = calculate_bollinger_bands(sub_1y)
 
         # Current Market Data
         ltp = float(curr_candles["Close"].iloc[-1])
@@ -213,6 +224,16 @@ def fetch_and_screen(
             "PD_Cam_L3": round(pd_cam_l3, 2),
             "PD_Cam_L4": round(pd_cam_l4, 2),
             "Cam_Status": cam_status,
+            "BB_Upper": bb_info["upper"],
+            "BB_Middle": bb_info["sma20"],
+            "BB_Lower": bb_info["lower"],
+            "BB_Bandwidth%": bb_info["bandwidth"],
+            "BB_Min_Bandwidth%": bb_info["min_bandwidth"],
+            "BB_Is_Squeezing": bb_info["is_squeezing"],
+            "BB_Was_Squeezing": bb_info["was_squeezing"],
+            "BB_Status": bb_info["status"],
+            "BB_Bull_Signal": bb_info["bullish_squeeze_signal"],
+            "BB_Bear_Signal": bb_info["bearish_squeeze_signal"],
             "Ticker": t
         })
 
@@ -224,14 +245,14 @@ def fetch_and_screen(
 
     # ----------------- VECTORIZED SCREENING LOGIC -----------------
     
-    # 1. Core Breakout Conditions
+    # 1. Core Value Area & 52-Week Breakout Conditions
     cond_bull_vah = df["LTP"] > df["PD_VAH"]
     cond_bull_52w = df["LTP"] >= (df["52W_High"] * high_proximity_pct)
 
     cond_bear_val = df["LTP"] < df["PD_VAL"]
     cond_bear_52w = df["LTP"] <= (df["52W_Low"] * low_proximity_pct)
 
-    # 2. CPR Filter (Money Zone Criteria: Bullish > PD_CPR_Top, Bearish < PD_CPR_Bottom)
+    # 2. CPR Filter (Money Zone Criteria)
     if enable_cpr_filter:
         cond_bull_cpr = df["LTP"] > df["PD_CPR_Top"]
         cond_bear_cpr = df["LTP"] < df["PD_CPR_Bottom"]
@@ -250,9 +271,23 @@ def fetch_and_screen(
         cond_bull_cam = pd.Series(True, index=df.index)
         cond_bear_cam = pd.Series(True, index=df.index)
 
+    # 4. Bollinger Bands Squeeze & Breakout Filter
+    if bollinger_filter == "Squeeze Breakout (Master Confluence)":
+        cond_bull_bb = df["BB_Bull_Signal"] | (df["BB_Was_Squeezing"] & (df["LTP"] > df["BB_Upper"]))
+        cond_bear_bb = df["BB_Bear_Signal"] | (df["BB_Was_Squeezing"] & (df["LTP"] < df["BB_Lower"]))
+    elif bollinger_filter == "Currently Squeezing (Coil)":
+        cond_bull_bb = df["BB_Is_Squeezing"]
+        cond_bear_bb = df["BB_Is_Squeezing"]
+    elif bollinger_filter == "Price Outside Bands (Upper/Lower)":
+        cond_bull_bb = df["LTP"] > df["BB_Upper"]
+        cond_bear_bb = df["LTP"] < df["BB_Lower"]
+    else:
+        cond_bull_bb = pd.Series(True, index=df.index)
+        cond_bear_bb = pd.Series(True, index=df.index)
+
     # Final Combined Triggers
-    df["Bullish_Breakout"] = cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam
-    df["Bearish_Breakdown"] = cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam
+    df["Bullish_Breakout"] = cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & cond_bull_bb
+    df["Bearish_Breakdown"] = cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & cond_bear_bb
 
     # Distance Metrics
     df["Dist_VAH%"] = ((df["LTP"] - df["PD_VAH"]) / df["PD_VAH"] * 100.0).round(2)
@@ -266,12 +301,16 @@ def fetch_and_screen(
     conditions = [
         df["Bullish_Breakout"],
         df["Bearish_Breakdown"],
+        df["BB_Bull_Signal"],
+        df["BB_Is_Squeezing"],
         df["LTP"] > df["PD_VAH"],
         df["LTP"] < df["PD_VAL"]
     ]
     choices = [
         "🚀 BULLISH BREAKOUT",
         "🔻 BEARISH BREAKDOWN",
+        "💥 BB Squeeze Breakout",
+        "🌀 BB Squeezing (Coil)",
         "⚡ Above VAH (Not Near 52W High)",
         "⚡ Below VAL (Not Near 52W Low)"
     ]
@@ -284,14 +323,18 @@ def fetch_and_screen(
     # Sort main dataframe by Symbol
     all_df = df.sort_values(by="Symbol").reset_index(drop=True)
 
+    squeezing_count = int(df["BB_Is_Squeezing"].sum())
+
     meta = {
         "ref_date": ref_date_str,
         "live_date": live_date_str,
         "total_scanned": len(df),
         "bullish_count": len(bullish_df),
         "bearish_count": len(bearish_df),
+        "squeezing_count": squeezing_count,
         "cpr_filter_active": enable_cpr_filter,
-        "camarilla_filter_mode": camarilla_filter
+        "camarilla_filter_mode": camarilla_filter,
+        "bollinger_filter_mode": bollinger_filter
     }
 
     return all_df, bullish_df, bearish_df, meta
@@ -299,7 +342,7 @@ def fetch_and_screen(
 
 def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
     """
-    Fetches intraday data and computes Volume Profile, CPR, and Camarilla for charting a single stock
+    Fetches intraday data and computes Volume Profile, CPR, Camarilla, and Bollinger Bands for charting
     """
     ticker = get_yf_symbol(symbol)
     df = yf.download(ticker, period="5d", interval=timeframe, progress=False)
@@ -345,12 +388,20 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
         "l4": round(prev_c - (cam_rng * 1.1 / 2.0), 2)
     }
 
+    # Bollinger Bands for daily
+    try:
+        daily_df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        bb = calculate_bollinger_bands(daily_df)
+    except Exception:
+        bb = {}
+
     return {
         "prev_df": prev_df,
         "curr_df": curr_df,
         "vp": vp,
         "cpr": cpr,
         "cam": cam,
+        "bb": bb,
         "bins": bins,
         "vols": vols,
         "prev_date": str(prev_date),
