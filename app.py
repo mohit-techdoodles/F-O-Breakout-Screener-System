@@ -456,7 +456,7 @@ with tab4:
 
 # ----------------- TAB 5: DOCUMENTATION -----------------
 with tab5:
-    st.markdown("""
+    st.markdown(r"""
     ### 📖 Institutional Breakout Strategy & Confluence Framework
     
     This screener tracks high-probability breakout momentum by combining **Volume Profile**, **Central Pivot Range (CPR / Money Zone)**, **Camarilla Pivots**, and **Trailing 52-Week Extremes**.
