@@ -242,7 +242,7 @@ with tab1:
             "Symbol", "LTP", "Chg%", "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", "PD_POC"
         ]].copy()
         
-        display_bull.rename(columns={
+        display_bull = display_bull.rename(columns={
             "LTP": "LTP (₹)",
             "Chg%": "Day Chg %",
             "PD_VAH": "Yesterday VAH (₹)",
@@ -250,7 +250,7 @@ with tab1:
             "52W_High": "52W High (₹)",
             "Dist_52W_High%": "% From 52W High",
             "PD_POC": "Yesterday POC (₹)"
-        }, inplace=True)
+        })
         
         # Highlight styling with compatibility for pandas 2 and 3
         styler = display_bull.style.format({
@@ -293,7 +293,7 @@ with tab2:
             "Symbol", "LTP", "Chg%", "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", "PD_POC"
         ]].copy()
         
-        display_bear.rename(columns={
+        display_bear = display_bear.rename(columns={
             "LTP": "LTP (₹)",
             "Chg%": "Day Chg %",
             "PD_VAL": "Yesterday VAL (₹)",
@@ -301,7 +301,7 @@ with tab2:
             "52W_Low": "52W Low (₹)",
             "Dist_52W_Low%": "% From 52W Low",
             "PD_POC": "Yesterday POC (₹)"
-        }, inplace=True)
+        })
         
         # Highlight styling with compatibility for pandas 2 and 3
         styler = display_bear.style.format({
