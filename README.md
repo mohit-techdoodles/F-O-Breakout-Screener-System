@@ -1,18 +1,22 @@
-# 📈 NSE F&O Breakout Screener (VAH/VAL & 52-Week Extremes)
+# 📈 NSE F&O Breakout Screener (VAH/VAL, CPR & Camarilla & 52W Extremes)
 
-A quantitative stock screener built in Python and Streamlit designed to identify institutional breakout and breakdown momentum across **NSE F&O permitted stocks**.
+A quantitative institutional stock screener built in Python and Streamlit designed to identify multi-confluence breakout and breakdown momentum across **NSE F&O permitted stocks**.
 
 ---
 
-## 🎯 Screening Strategy & Logic
+## 🎯 Screening Strategy & Confluence Logic
 
 ### Setup A: Bullish Breakout (Long Setup)
 - **Condition 1 (Value Area Breakout)**: `LTP > PD_VAH` (Price trading above yesterday's 70% Value Area High)
 - **Condition 2 (52-Week High Proximity)**: `LTP >= 52W_High * 0.95` (Trading within 5% of 52-week high)
+- **Condition 3 (CPR Money Zone)**: `LTP > PD_CPR_Top` (Trading above yesterday's Central Pivot Range)
+- **Condition 4 (Camarilla Breakout)**: `LTP > Cam_H4` (Confirmed momentum above Camarilla H4 level)
 
 ### Setup B: Bearish Breakdown (Short Setup)
 - **Condition 1 (Value Area Breakdown)**: `LTP < PD_VAL` (Price trading below yesterday's 70% Value Area Low)
 - **Condition 2 (52-Week Low Proximity)**: `LTP <= 52W_Low * 1.05` (Trading within 5% of 52-week low)
+- **Condition 3 (CPR Money Zone)**: `LTP < PD_CPR_Bottom` (Trading below yesterday's Central Pivot Range)
+- **Condition 4 (Camarilla Breakdown)**: `LTP < Cam_L4` (Confirmed liquidation below Camarilla L4 level)
 
 ---
 

@@ -1,7 +1,8 @@
 """
-Interactive Plotly Chart with Candlesticks, Volume Profile, VAH, VAL, POC & 52W Extremes
+Interactive Plotly Chart with Candlesticks, Volume Profile, CPR, Camarilla & 52W Extremes
 """
 
+from typing import Optional
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
@@ -15,14 +16,18 @@ def create_breakout_chart(
     vp: dict,
     h52: float,
     l52: float,
-    ltp: float
+    ltp: float,
+    cpr: Optional[dict] = None,
+    cam: Optional[dict] = None
 ) -> go.Figure:
     """
-    Renders an institutional-grade Candlestick chart with Volume Profile levels:
+    Renders an institutional-grade Candlestick chart with:
     - Candlesticks for previous day and current day
     - PD_VAH (Green Dashed Line)
     - PD_POC (Yellow Line)
     - PD_VAL (Red Dashed Line)
+    - CPR Zone (Cyan / Blue Lines)
+    - Camarilla H4 / L4 (Orange / Purple Breakout Levels)
     - 52W High and 95% threshold line
     - Volume bars at the bottom
     """
@@ -67,7 +72,7 @@ def create_breakout_chart(
         row=2, col=1
     )
 
-    # Add Reference Lines across the chart
+    # Volume Profile Lines
     pd_vah = vp.get("PD_VAH")
     pd_val = vp.get("PD_VAL")
     pd_poc = vp.get("PD_POC")
@@ -108,26 +113,80 @@ def create_breakout_chart(
             row=1, col=1
         )
 
+    # CPR Lines (Money Zone)
+    if cpr:
+        cpr_top = cpr.get("top")
+        cpr_bot = cpr.get("bottom")
+        if cpr_top and not np.isnan(cpr_top):
+            fig.add_hline(
+                y=cpr_top,
+                line_dash="dot",
+                line_color="#29B6F6",
+                line_width=1.2,
+                annotation_text=f"CPR Top (₹{cpr_top})",
+                annotation_position="top left",
+                annotation_font=dict(color="#29B6F6", size=10),
+                row=1, col=1
+            )
+        if cpr_bot and not np.isnan(cpr_bot):
+            fig.add_hline(
+                y=cpr_bot,
+                line_dash="dot",
+                line_color="#29B6F6",
+                line_width=1.2,
+                annotation_text=f"CPR Bottom (₹{cpr_bot})",
+                annotation_position="bottom left",
+                annotation_font=dict(color="#29B6F6", size=10),
+                row=1, col=1
+            )
+
+    # Camarilla H4 and L4 Breakout Lines
+    if cam:
+        h4 = cam.get("h4")
+        l4 = cam.get("l4")
+        if h4 and not np.isnan(h4):
+            fig.add_hline(
+                y=h4,
+                line_dash="longdash",
+                line_color="#FF9800",
+                line_width=1.2,
+                annotation_text=f"Cam H4 Breakout (₹{h4})",
+                annotation_position="top right",
+                annotation_font=dict(color="#FF9800", size=10),
+                row=1, col=1
+            )
+        if l4 and not np.isnan(l4):
+            fig.add_hline(
+                y=l4,
+                line_dash="longdash",
+                line_color="#E040FB",
+                line_width=1.2,
+                annotation_text=f"Cam L4 Breakdown (₹{l4})",
+                annotation_position="bottom right",
+                annotation_font=dict(color="#E040FB", size=10),
+                row=1, col=1
+            )
+
     # 52W High threshold (95% level)
     if h52 and not np.isnan(h52):
         h52_trigger = h52 * 0.95
         fig.add_hline(
             y=h52_trigger,
             line_dash="dashdot",
-            line_color="#00B0FF",
+            line_color="#AB47BC",
             line_width=1.2,
-            annotation_text=f"52W High 95% Trigger (₹{h52_trigger:.2f})",
+            annotation_text=f"52W High 95% (₹{h52_trigger:.2f})",
             annotation_position="top left",
-            annotation_font=dict(color="#00B0FF", size=10),
+            annotation_font=dict(color="#AB47BC", size=10),
             row=1, col=1
         )
 
     # Layout styling (Dark terminal theme)
     fig.update_layout(
-        title=f"<b>{symbol}</b> — Intraday Price & Volume Profile Levels (LTP: ₹{ltp:.2f})",
+        title=f"<b>{symbol}</b> — Intraday Price, Volume Profile, CPR & Camarilla (LTP: ₹{ltp:.2f})",
         template="plotly_dark",
         xaxis_rangeslider_visible=False,
-        height=620,
+        height=640,
         margin=dict(l=40, r=60, t=50, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -136,4 +195,3 @@ def create_breakout_chart(
     fig.update_yaxes(title_text="Volume", row=2, col=1)
 
     return fig
-
