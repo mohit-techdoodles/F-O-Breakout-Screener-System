@@ -4,10 +4,23 @@ Streamlit Application
 """
 
 import datetime
+import importlib
 import inspect
 import time
 import pandas as pd
 import streamlit as st
+
+import fo_stocks
+import screener_engine
+import chart_utils
+import bollinger_screener
+import volume_profile
+
+importlib.reload(fo_stocks)
+importlib.reload(screener_engine)
+importlib.reload(chart_utils)
+importlib.reload(bollinger_screener)
+importlib.reload(volume_profile)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
 from screener_engine import fetch_and_screen, get_single_stock_chart_data

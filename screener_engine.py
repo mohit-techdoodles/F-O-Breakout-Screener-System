@@ -27,7 +27,8 @@ def fetch_and_screen(
     low_proximity_pct: float = 1.05,
     enable_cpr_filter: bool = True,
     camarilla_filter: str = "None",
-    bollinger_filter: str = "None"
+    bollinger_filter: str = "None",
+    **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
     Downloads intraday and 52-week data in batch, computes Volume Profile,
