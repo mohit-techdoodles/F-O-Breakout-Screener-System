@@ -128,6 +128,21 @@ enable_cpr = st.sidebar.checkbox(
     help="Bullish Setup: LTP must be above Previous Day CPR Top.\nBearish Setup: LTP must be below Previous Day CPR Bottom."
 )
 
+only_narrow_cpr = st.sidebar.checkbox(
+    "🎯 Only Narrow Daily CPR (Trending Setup)",
+    value=False,
+    help="Filter stocks with narrow CPR width, which signals an explosive breakout or high-probability trending session."
+)
+
+narrow_cpr_max = st.sidebar.slider(
+    "Max Narrow CPR Width (%)",
+    min_value=0.10,
+    max_value=1.00,
+    value=0.35,
+    step=0.05,
+    help="CPR Width % = |TC - BC| / Pivot * 100.\n🎯 Ultra Narrow: <= 0.15%\n⚡ Narrow: <= 0.35%\nAverage: 0.35% - 0.70%\nWide: > 0.70%"
+)
+
 camarilla_mode = st.sidebar.selectbox(
     "Camarilla Pivot Criteria",
     ["None", "H4 / L4 Breakout (Strong)", "H3 / L3 Range Breakout"],
@@ -160,13 +175,15 @@ refresh_clicked = st.sidebar.button("🔄 Scan Now", **get_width_kw(st.button))
 
 # Helper function to cache screening data (cached for 60 seconds)
 @st.cache_data(ttl=60, show_spinner=False)
-def get_cached_screener_data(syms, tf, h_prox, l_prox, cpr_flag, cam_mode, bb_mode):
+def get_cached_screener_data(syms, tf, h_prox, l_prox, cpr_flag, narrow_cpr_flag, narrow_max, cam_mode, bb_mode):
     return fetch_and_screen(
         syms, 
         timeframe=tf, 
         high_proximity_pct=h_prox, 
         low_proximity_pct=l_prox,
         enable_cpr_filter=cpr_flag,
+        only_narrow_cpr=narrow_cpr_flag,
+        narrow_cpr_max_pct=narrow_max,
         camarilla_filter=cam_mode,
         bollinger_filter=bb_mode
     )
@@ -207,7 +224,7 @@ with st.spinner(f"Scanning {len(selected_symbols)} F&O stocks with Volume Profil
     if refresh_clicked:
         st.cache_data.clear()
     all_df, bull_df, bear_df, meta = get_cached_screener_data(
-        selected_symbols, timeframe, high_proximity, low_proximity, enable_cpr, camarilla_mode, bollinger_filter
+        selected_symbols, timeframe, high_proximity, low_proximity, enable_cpr, only_narrow_cpr, narrow_cpr_max, camarilla_mode, bollinger_filter
     )
 
 if all_df.empty:
@@ -218,7 +235,7 @@ if all_df.empty:
 squeeze_df = all_df[all_df["BB_Is_Squeezing"]].sort_values(by="BB_Bandwidth%", ascending=True).copy()
 
 # Top Metric Cards Row
-m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 with m1:
     st.markdown(f"""
     <div class="metric-card">
@@ -252,6 +269,14 @@ with m4:
     """, unsafe_allow_html=True)
 
 with m5:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">Narrow CPR (Trending)</div>
+        <div class="metric-val" style="color: #FFB300;">{meta.get('narrow_cpr_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with m6:
     ref_d = meta.get('ref_date', 'N/A')
     live_d = meta.get('live_date', 'N/A')
     st.markdown(f"""
@@ -279,6 +304,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 # ----------------- TAB 1: BULLISH BREAKOUTS -----------------
 with tab1:
     cpr_rule_txt = "✅ **CPR Money Zone:** `LTP > PD_CPR_Top`" if enable_cpr else "⚪ CPR Money Zone filter is optional/off"
+    narrow_rule_txt = f"✅ **Narrow CPR Filter:** Active (≤ {narrow_cpr_max:.2f}%)" if only_narrow_cpr else "⚪ Narrow CPR filter is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
     
@@ -287,8 +313,9 @@ with tab1:
     > 1. **Value Area Breakout:** `LTP > PD_VAH` (Breaking out above yesterday's 70% value area)  
     > 2. **52-Week High Proximity:** `LTP >= 52W_High * {int(high_proximity*100)}%` (Trading within {100-int(high_proximity*100)}% of 52-Week High)  
     > 3. {cpr_rule_txt}  
-    > 4. {cam_rule_txt}  
-    > 5. {bb_rule_txt}  
+    > 4. {narrow_rule_txt}  
+    > 5. {cam_rule_txt}  
+    > 6. {bb_rule_txt}  
     """)
     
     if bull_df.empty:
@@ -298,7 +325,7 @@ with tab1:
         
         display_bull = bull_df[[
             "Symbol", "LTP", "Chg%", "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
-            "CPR_Status", "PD_CPR_Top", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
+            "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
         
         display_bull = display_bull.rename(columns={
@@ -309,6 +336,8 @@ with tab1:
             "52W_High": "52W High (₹)",
             "Dist_52W_High%": "% From 52W High",
             "CPR_Status": "CPR Money Zone",
+            "CPR_Type": "CPR Width Type",
+            "PD_CPR_Width%": "CPR Width %",
             "PD_CPR_Top": "CPR Top (₹)",
             "Cam_Status": "Camarilla Status",
             "BB_Status": "Bollinger Bands Status",
@@ -323,6 +352,7 @@ with tab1:
             "% Above VAH": "+{:.2f}%",
             "52W High (₹)": "₹{:.2f}",
             "% From 52W High": "{:+.2f}%",
+            "CPR Width %": "{:.3f}%",
             "CPR Top (₹)": "₹{:.2f}",
             "BB Bandwidth %": "{:.2f}%",
             "Yesterday POC (₹)": "₹{:.2f}"
@@ -345,6 +375,7 @@ with tab1:
 # ----------------- TAB 2: BEARISH BREAKDOWNS -----------------
 with tab2:
     cpr_rule_txt = "✅ **CPR Money Zone:** `LTP < PD_CPR_Bottom`" if enable_cpr else "⚪ CPR Money Zone filter is optional/off"
+    narrow_rule_txt = f"✅ **Narrow CPR Filter:** Active (≤ {narrow_cpr_max:.2f}%)" if only_narrow_cpr else "⚪ Narrow CPR filter is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
 
@@ -353,8 +384,9 @@ with tab2:
     > 1. **Value Area Breakdown:** `LTP < PD_VAL` (Breaking down below yesterday's 70% value area)  
     > 2. **52-Week Low Proximity:** `LTP <= 52W_Low * {int(low_proximity*100)}%` (Trading within {int(low_proximity*100)-100}% of 52-Week Low)  
     > 3. {cpr_rule_txt}  
-    > 4. {cam_rule_txt}  
-    > 5. {bb_rule_txt}  
+    > 4. {narrow_rule_txt}  
+    > 5. {cam_rule_txt}  
+    > 6. {bb_rule_txt}  
     """)
     
     if bear_df.empty:
@@ -364,7 +396,7 @@ with tab2:
         
         display_bear = bear_df[[
             "Symbol", "LTP", "Chg%", "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
-            "CPR_Status", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
+            "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
         
         display_bear = display_bear.rename(columns={
@@ -375,6 +407,8 @@ with tab2:
             "52W_Low": "52W Low (₹)",
             "Dist_52W_Low%": "% From 52W Low",
             "CPR_Status": "CPR Money Zone",
+            "CPR_Type": "CPR Width Type",
+            "PD_CPR_Width%": "CPR Width %",
             "PD_CPR_Bottom": "CPR Bottom (₹)",
             "Cam_Status": "Camarilla Status",
             "BB_Status": "Bollinger Bands Status",
@@ -389,6 +423,7 @@ with tab2:
             "% Below VAL": "{:.2f}%",
             "52W Low (₹)": "₹{:.2f}",
             "% From 52W Low": "{:+.2f}%",
+            "CPR Width %": "{:.3f}%",
             "CPR Bottom (₹)": "₹{:.2f}",
             "BB Bandwidth %": "{:.2f}%",
             "Yesterday POC (₹)": "₹{:.2f}"
@@ -496,7 +531,7 @@ with tab4:
         c1.metric("LTP", f"₹{stock_row['LTP']:.2f}", f"{stock_row['Chg%']:+.2f}%")
         c2.metric("PD_VAH (Green)", f"₹{stock_row['PD_VAH']:.2f}")
         c3.metric("PD_VAL (Red)", f"₹{stock_row['PD_VAL']:.2f}")
-        c4.metric("CPR Top / Bot", f"₹{stock_row['PD_CPR_Top']:.2f}", f"Bot: ₹{stock_row['PD_CPR_Bottom']:.2f}")
+        c4.metric(f"CPR ({stock_row['CPR_Type']})", f"₹{stock_row['PD_CPR_Top']:.2f}", f"Width: {stock_row['PD_CPR_Width%']:.3f}%")
         c5.metric("Cam H4 / L4", f"₹{stock_row['PD_Cam_H4']:.2f}", f"L4: ₹{stock_row['PD_Cam_L4']:.2f}")
         c6.metric("BB Bandwidth", f"{stock_row['BB_Bandwidth%']:.2f}%", f"Min: {stock_row['BB_Min_Bandwidth%']:.2f}%")
     else:
@@ -514,7 +549,7 @@ with tab5:
 
     display_all = filter_df[[
         "Symbol", "LTP", "Chg%", "Signal", "PD_VAH", "Dist_VAH%", "PD_VAL", "Dist_VAL%", 
-        "CPR_Status", "PD_CPR_Top", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "52W_High", "Dist_52W_High%"
+        "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "52W_High", "Dist_52W_High%"
     ]].copy()
 
     st.dataframe(
@@ -525,6 +560,7 @@ with tab5:
             "Dist_VAH%": "{:+.2f}%",
             "PD_VAL": "₹{:.2f}",
             "Dist_VAL%": "{:+.2f}%",
+            "PD_CPR_Width%": "{:.3f}%",
             "PD_CPR_Top": "₹{:.2f}",
             "PD_CPR_Bottom": "₹{:.2f}",
             "BB_Bandwidth%": "{:.2f}%",
@@ -561,7 +597,7 @@ with tab6:
     
     ---
 
-    #### 2. Central Pivot Range (CPR / Money Zone)
+    #### 2. Central Pivot Range (CPR / Money Zone) & Narrow CPR
     CPR defines the institutional fair-value zone:
     - **Pivot (P)** = $\frac{High + Low + Close}{3}$
     - **Bottom Central (BC)** = $\frac{High + Low}{2}$
@@ -570,6 +606,17 @@ with tab6:
     
     * **Bullish Money Zone Rule:** $\text{LTP} > \text{PD_CPR_Top}$ (Institutional buyers are accepting prices above fair value)
     * **Bearish Money Zone Rule:** $\text{LTP} < \text{PD_CPR_Bottom}$ (Institutional sellers are dominating below fair value)
+
+    ##### 🎯 The Power of Narrow Daily CPR:
+    - **CPR Width** = $|\text{TC} - \text{BC}|$
+    - **CPR Width %** = $\frac{|\text{TC} - \text{BC}|}{\text{Pivot}} \times 100$
+    
+    | Classification | CPR Width % | Market Character & Trading Significance |
+    | :--- | :--- | :--- |
+    | **🎯 Ultra Narrow** | $\le 0.15\%$ | Extreme consolidation yesterday. **Highest probability of an explosive directional trend / trending day.** |
+    | **⚡ Narrow** | $0.15\% - 0.35\%$ | High potential for sustained trend and clean breakout moves. |
+    | **Average** | $0.35\% - 0.70\%$ | Moderate trending capability with standard intraday volatility. |
+    | **Wide** | $> 0.70\%$ | Broad value area. **High likelihood of sideways / choppy / range-bound day.** Avoid breakout trades; prefer range reversals. |
 
     ---
 

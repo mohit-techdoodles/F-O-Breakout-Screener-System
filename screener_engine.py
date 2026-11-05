@@ -26,6 +26,8 @@ def fetch_and_screen(
     high_proximity_pct: float = 0.95,
     low_proximity_pct: float = 1.05,
     enable_cpr_filter: bool = True,
+    only_narrow_cpr: bool = False,
+    narrow_cpr_max_pct: float = 0.35,
     camarilla_filter: str = "None",
     bollinger_filter: str = "None",
     **kwargs
@@ -178,6 +180,21 @@ def fetch_and_screen(
         pd_cpr_top = max(pd_tc, pd_bc)
         pd_cpr_bottom = min(pd_tc, pd_bc)
 
+        # CPR Width & Narrow CPR Detection
+        pd_cpr_width = abs(pd_tc - pd_bc)
+        pd_cpr_width_pct = (pd_cpr_width / pd_pivot * 100.0) if pd_pivot > 0 else 0.0
+
+        if pd_cpr_width_pct <= 0.15:
+            cpr_type = "🎯 Ultra Narrow"
+        elif pd_cpr_width_pct <= 0.35:
+            cpr_type = "⚡ Narrow"
+        elif pd_cpr_width_pct <= 0.70:
+            cpr_type = "Average"
+        else:
+            cpr_type = "Wide"
+
+        is_narrow_cpr = pd_cpr_width_pct <= narrow_cpr_max_pct
+
         if ltp > pd_cpr_top:
             cpr_status = "🟢 Above CPR"
         elif ltp < pd_cpr_bottom:
@@ -219,6 +236,10 @@ def fetch_and_screen(
             "PD_CPR_Top": round(pd_cpr_top, 2),
             "PD_CPR_Pivot": round(pd_pivot, 2),
             "PD_CPR_Bottom": round(pd_cpr_bottom, 2),
+            "PD_CPR_Width": round(pd_cpr_width, 2),
+            "PD_CPR_Width%": round(pd_cpr_width_pct, 3),
+            "CPR_Type": cpr_type,
+            "Is_Narrow_CPR": is_narrow_cpr,
             "CPR_Status": cpr_status,
             "PD_Cam_H4": round(pd_cam_h4, 2),
             "PD_Cam_H3": round(pd_cam_h3, 2),
@@ -286,9 +307,15 @@ def fetch_and_screen(
         cond_bull_bb = pd.Series(True, index=df.index)
         cond_bear_bb = pd.Series(True, index=df.index)
 
+    # 5. Narrow CPR Filter
+    if only_narrow_cpr:
+        cond_narrow_cpr = df["Is_Narrow_CPR"]
+    else:
+        cond_narrow_cpr = pd.Series(True, index=df.index)
+
     # Final Combined Triggers
-    df["Bullish_Breakout"] = cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & cond_bull_bb
-    df["Bearish_Breakdown"] = cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & cond_bear_bb
+    df["Bullish_Breakout"] = cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & cond_bull_bb & cond_narrow_cpr
+    df["Bearish_Breakdown"] = cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & cond_bear_bb & cond_narrow_cpr
 
     # Distance Metrics
     df["Dist_VAH%"] = ((df["LTP"] - df["PD_VAH"]) / df["PD_VAH"] * 100.0).round(2)
@@ -325,6 +352,7 @@ def fetch_and_screen(
     all_df = df.sort_values(by="Symbol").reset_index(drop=True)
 
     squeezing_count = int(df["BB_Is_Squeezing"].sum())
+    narrow_cpr_count = int(df["Is_Narrow_CPR"].sum())
 
     meta = {
         "ref_date": ref_date_str,
@@ -333,6 +361,8 @@ def fetch_and_screen(
         "bullish_count": len(bullish_df),
         "bearish_count": len(bearish_df),
         "squeezing_count": squeezing_count,
+        "narrow_cpr_count": narrow_cpr_count,
+        "only_narrow_cpr": only_narrow_cpr,
         "cpr_filter_active": enable_cpr_filter,
         "camarilla_filter_mode": camarilla_filter,
         "bollinger_filter_mode": bollinger_filter
@@ -374,10 +404,16 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
     pd_pivot = (prev_h + prev_l + prev_c) / 3.0
     pd_bc = (prev_h + prev_l) / 2.0
     pd_tc = (2.0 * pd_pivot) - pd_bc
+    pd_width = abs(pd_tc - pd_bc)
+    pd_width_pct = (pd_width / pd_pivot * 100.0) if pd_pivot > 0 else 0.0
+    cpr_type = "🎯 Ultra Narrow" if pd_width_pct <= 0.15 else ("⚡ Narrow" if pd_width_pct <= 0.35 else ("Average" if pd_width_pct <= 0.70 else "Wide"))
     cpr = {
         "top": round(max(pd_tc, pd_bc), 2),
         "pivot": round(pd_pivot, 2),
-        "bottom": round(min(pd_tc, pd_bc), 2)
+        "bottom": round(min(pd_tc, pd_bc), 2),
+        "width": round(pd_width, 2),
+        "width_pct": round(pd_width_pct, 3),
+        "type": cpr_type
     }
 
     # Camarilla
