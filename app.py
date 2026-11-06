@@ -194,6 +194,18 @@ enable_bbw_squeeze = st.sidebar.checkbox(
     help="Checks if Bollinger Bandwidth was tighter than its 20-day average on the prior session (T-1) before the breakout."
 )
 
+enable_weekly = st.sidebar.checkbox(
+    "Require Weekly Context Alignment",
+    value=False,
+    help="Section 8: Bullish requires LTP > Weekly VAH & Bullish/Inside Bias. Bearish requires LTP < Weekly VAL & Bearish/Inside Bias."
+)
+
+enable_nr7 = st.sidebar.checkbox(
+    "Require NR7 Volatility Compression",
+    value=False,
+    help="Section 5: Filters for stocks where today or yesterday recorded the narrowest daily range of the last 7 sessions."
+)
+
 # Auto-refresh
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Live Refresh")
@@ -205,7 +217,7 @@ refresh_clicked = st.sidebar.button("🔄 Scan Now", **get_width_kw(st.button))
 @st.cache_data(ttl=60, show_spinner=False)
 def get_cached_screener_data(
     syms, tf, h_prox, l_prox, cpr_flag, narrow_cpr_flag, narrow_max, cam_mode, bb_mode,
-    rvol_flag, rvol_thresh, bbw_squeeze_flag
+    rvol_flag, rvol_thresh, bbw_squeeze_flag, weekly_flag, nr7_flag
 ):
     return fetch_and_screen(
         syms, 
@@ -219,7 +231,9 @@ def get_cached_screener_data(
         bollinger_filter=bb_mode,
         enable_rvol=rvol_flag,
         rvol_threshold=rvol_thresh,
-        enable_bbw_squeeze=bbw_squeeze_flag
+        enable_bbw_squeeze=bbw_squeeze_flag,
+        enable_weekly_filter=weekly_flag,
+        enable_nr7_filter=nr7_flag
     )
 
 
@@ -259,7 +273,8 @@ with st.spinner(f"Scanning {len(selected_symbols)} F&O stocks with Volume Profil
         st.cache_data.clear()
     all_df, bull_df, bear_df, meta = get_cached_screener_data(
         selected_symbols, timeframe, high_proximity, low_proximity, enable_cpr, only_narrow_cpr, narrow_cpr_max, 
-        camarilla_mode, bollinger_filter, enable_rvol, rvol_threshold, enable_bbw_squeeze
+        camarilla_mode, bollinger_filter, enable_rvol, rvol_threshold, enable_bbw_squeeze,
+        enable_weekly, enable_nr7
     )
 
 if all_df.empty:
@@ -343,6 +358,8 @@ with tab1:
     narrow_rule_txt = f"✅ **Narrow CPR Filter:** Active (≤ {narrow_cpr_max:.2f}%)" if only_narrow_cpr else "⚪ Narrow CPR filter is optional/off"
     rvol_rule_txt = f"✅ **RVOL Filter:** Active (≥ {rvol_threshold:.1f}x)" if enable_rvol else "⚪ RVOL filter is optional/off"
     bbw_rule_txt = "✅ **BBW Contraction:** Required on T-1" if enable_bbw_squeeze else "⚪ BBW Contraction is optional/off"
+    weekly_rule_txt = "✅ **Weekly Structure Alignment:** `LTP > W_VAH` & Bullish/Inside Bias" if enable_weekly else "⚪ Weekly structure filter is optional/off"
+    nr7_rule_txt = "✅ **NR7 Volatility Compression:** Required on T-1 or T0" if enable_nr7 else "⚪ NR7 compression filter is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
     
@@ -354,8 +371,10 @@ with tab1:
     > 4. {narrow_rule_txt}  
     > 5. {rvol_rule_txt}  
     > 6. {bbw_rule_txt}  
-    > 7. {cam_rule_txt}  
-    > 8. {bb_rule_txt}  
+    > 7. {weekly_rule_txt}  
+    > 8. {nr7_rule_txt}  
+    > 9. {cam_rule_txt}  
+    > 10. {bb_rule_txt}  
     """)
     
     if bull_df.empty:
@@ -364,7 +383,8 @@ with tab1:
         st.success(f"🎯 Found **{len(bull_df)}** Bullish Breakout candidate(s)!")
         
         display_bull = bull_df[[
-            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
+            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAH", "Dist_W_VAH%", 
+            "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
         
@@ -373,6 +393,10 @@ with tab1:
             "Chg%": "Day Chg %",
             "RVOL": "RVOL (20D)",
             "BBW_Contract_Status": "BBW Contraction",
+            "NR7_Status": "NR7 Status",
+            "W_CPR_Bias": "Weekly Bias",
+            "W_VAH": "Weekly VAH (₹)",
+            "Dist_W_VAH%": "% vs W_VAH",
             "PD_VAH": "Yesterday VAH (₹)",
             "Dist_VAH%": "% Above VAH",
             "52W_High": "52W High (₹)",
@@ -391,6 +415,8 @@ with tab1:
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
             "RVOL (20D)": "{:.2f}x",
+            "Weekly VAH (₹)": "₹{:.2f}",
+            "% vs W_VAH": "{:+.2f}%",
             "Yesterday VAH (₹)": "₹{:.2f}",
             "% Above VAH": "+{:.2f}%",
             "52W High (₹)": "₹{:.2f}",
@@ -421,6 +447,8 @@ with tab2:
     narrow_rule_txt = f"✅ **Narrow CPR Filter:** Active (≤ {narrow_cpr_max:.2f}%)" if only_narrow_cpr else "⚪ Narrow CPR filter is optional/off"
     rvol_rule_txt = f"✅ **RVOL Filter:** Active (≥ {rvol_threshold:.1f}x)" if enable_rvol else "⚪ RVOL filter is optional/off"
     bbw_rule_txt = "✅ **BBW Contraction:** Required on T-1" if enable_bbw_squeeze else "⚪ BBW Contraction is optional/off"
+    weekly_rule_txt = "✅ **Weekly Structure Alignment:** `LTP < W_VAL` & Bearish/Inside Bias" if enable_weekly else "⚪ Weekly structure filter is optional/off"
+    nr7_rule_txt = "✅ **NR7 Volatility Compression:** Required on T-1 or T0" if enable_nr7 else "⚪ NR7 compression filter is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
 
@@ -432,8 +460,10 @@ with tab2:
     > 4. {narrow_rule_txt}  
     > 5. {rvol_rule_txt}  
     > 6. {bbw_rule_txt}  
-    > 7. {cam_rule_txt}  
-    > 8. {bb_rule_txt}  
+    > 7. {weekly_rule_txt}  
+    > 8. {nr7_rule_txt}  
+    > 9. {cam_rule_txt}  
+    > 10. {bb_rule_txt}  
     """)
     
     if bear_df.empty:
@@ -442,7 +472,8 @@ with tab2:
         st.error(f"🔻 Found **{len(bear_df)}** Bearish Breakdown candidate(s)!")
         
         display_bear = bear_df[[
-            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
+            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAL", "Dist_W_VAL%",
+            "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
         
@@ -451,6 +482,10 @@ with tab2:
             "Chg%": "Day Chg %",
             "RVOL": "RVOL (20D)",
             "BBW_Contract_Status": "BBW Contraction",
+            "NR7_Status": "NR7 Status",
+            "W_CPR_Bias": "Weekly Bias",
+            "W_VAL": "Weekly VAL (₹)",
+            "Dist_W_VAL%": "% vs W_VAL",
             "PD_VAL": "Yesterday VAL (₹)",
             "Dist_VAL%": "% Below VAL",
             "52W_Low": "52W Low (₹)",
@@ -469,6 +504,8 @@ with tab2:
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
             "RVOL (20D)": "{:.2f}x",
+            "Weekly VAL (₹)": "₹{:.2f}",
+            "% vs W_VAL": "{:+.2f}%",
             "Yesterday VAL (₹)": "₹{:.2f}",
             "% Below VAL": "{:.2f}%",
             "52W Low (₹)": "₹{:.2f}",
@@ -701,9 +738,13 @@ with tab5:
                 <b>Pivot:</b> ₹{nc.get('pivot')} &nbsp;|&nbsp;
                 <b>Bot:</b> ₹{nc.get('bottom')} &nbsp;|&nbsp;
                 <b>Cam H4:</b> ₹{n_cam.get('h4')} &nbsp;|&nbsp;
-                <b>Cam L4:</b> ₹{n_cam.get('l4')} &nbsp;|&nbsp;
-                <b>RVOL:</b> {q.get('rvol', 1.0)}x &nbsp;|&nbsp;
-                <b>BBW Squeeze:</b> {"⚡ Yes" if q.get("prior_is_contracting") else "No"}
+                <b>Cam L4:</b> ₹{n_cam.get('l4')}<br>
+                <span style="font-weight: 700; color: #AB47BC;">📅 Weekly Context (Sections 6-8):</span> &nbsp;
+                <b>Bias:</b> {q.get('w_cpr_bias', 'N/A')} &nbsp;|&nbsp;
+                <b>W_VAH:</b> ₹{q.get('w_vah', 0)} &nbsp;|&nbsp;
+                <b>W_VAL:</b> ₹{q.get('w_val', 0)} &nbsp;|&nbsp;
+                <b>NR7 Compression:</b> {"⚡ Yes (Coil)" if q.get("is_nr7") else ("Prior NR7" if q.get("prior_is_nr7") else "No")} &nbsp;|&nbsp;
+                <b>RVOL:</b> {q.get('rvol', 1.0)}x
             </div>
             """, unsafe_allow_html=True)
     else:
@@ -720,7 +761,8 @@ with tab6:
         filter_df = filter_df[filter_df["Symbol"].str.contains(search_query)]
 
     display_all = filter_df[[
-        "Symbol", "LTP", "Chg%", "Signal", "RVOL", "BBW_Contract_Status", "Next_CPR_Type", "Next_CPR_Width%",
+        "Symbol", "LTP", "Chg%", "Signal", "RVOL", "BBW_Contract_Status", "NR7_Status", 
+        "W_CPR_Bias", "W_VAH", "W_VAL", "Next_CPR_Type", "Next_CPR_Width%",
         "PD_VAH", "Dist_VAH%", "PD_VAL", "Dist_VAL%", 
         "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "PD_CPR_Bottom", 
         "Cam_Status", "BB_Status", "BB_Bandwidth%", "52W_High", "Dist_52W_High%"
@@ -731,6 +773,8 @@ with tab6:
             "LTP": "₹{:.2f}",
             "Chg%": "{:+.2f}%",
             "RVOL": "{:.2f}x",
+            "W_VAH": "₹{:.2f}",
+            "W_VAL": "₹{:.2f}",
             "Next_CPR_Width%": "{:.3f}%",
             "PD_VAH": "₹{:.2f}",
             "Dist_VAH%": "{:+.2f}%",
@@ -762,7 +806,7 @@ with tab7:
     st.markdown(r"""
     ### 📖 Institutional Breakout Strategy & Confluence Framework
     
-    This screener tracks high-probability breakout momentum by combining **Volume Profile**, **Central Pivot Range (CPR / Money Zone)**, **Camarilla Pivots**, **Bollinger Bands Squeeze & Volatility Expansion**, **Quantitative RVOL & BBW Contraction**, and **Trailing 52-Week Extremes**.
+    This screener tracks high-probability breakout momentum by combining **Volume Profile**, **Central Pivot Range (CPR / Money Zone)**, **Camarilla Pivots**, **Bollinger Bands Squeeze & Volatility Expansion**, **Quantitative RVOL & BBW Contraction**, **Weekly CPR Bias & Weekly Value Area**, and **Trailing 52-Week Extremes**.
     
     ---
 
@@ -816,7 +860,49 @@ with tab7:
 
     ---
 
-    #### 4. Bollinger Bands Squeeze & Volatility Expansion (Developer Spec)
+    #### 4. Open Interest (OI) Buildup & NR7 Volatility Compression (Section 5)
+    - **NR7 (Narrow Range 7)**: True when today's daily range ($\text{High} - \text{Low}$) is the tightest of the last 7 trading days. NR7 represents extreme coiling energy; explosive directional breakouts typically occur within 1–2 sessions of an NR7 bar.
+    - **Open Interest Buildup Matrix**:
+      - **Long Buildup**: Price $\uparrow$ + OI $\uparrow$ (Aggressive fresh long accumulation)
+      - **Short Buildup**: Price $\downarrow$ + OI $\uparrow$ (Aggressive institutional short creation)
+      - **Short Covering**: Price $\uparrow$ + OI $\downarrow$ (Short sellers covering panic positions)
+      - **Long Unwinding**: Price $\downarrow$ + OI $\downarrow$ (Profit booking / stop-loss hit on longs)
+
+    ---
+
+    #### 5. Weekly CPR (WCPR) & Value Relationship Logic (Section 6)
+    Defines the macro weekly directional bias:
+    - **Weekly Pivot**: $\frac{\text{Prev\_W\_High} + \text{Prev\_W\_Low} + \text{Prev\_W\_Close}}{3}$
+    - **Weekly BC**: $\frac{\text{Prev\_W\_High} + \text{Prev\_W\_Low}}{2}$
+    - **Weekly TC**: $2 \times \text{W\_Pivot} - \text{W\_BC}$
+    - **Weekly CPR Value Relationships (Bias)**:
+      - 🟢 **Bullish (Higher Value)**: Current Week $\text{Bottom CPR} > \text{Previous Week Top CPR}$
+      - 🔴 **Bearish (Lower Value)**: Current Week $\text{Top CPR} < \text{Previous Week Bottom CPR}$
+      - ⚡ **Breakout (Inside Value)**: Current Week CPR is completely contained inside Previous Week CPR (High-probability trending week).
+
+    ---
+
+    #### 6. Weekly Value Area (WVA) Structural Approximations (Section 7)
+    Approximates the weekly 70% institutional value area:
+    - $\text{W\_POC} = \frac{\text{Prev\_W\_High} + \text{Prev\_W\_Low} + \text{Prev\_W\_Close}}{3}$
+    - $\text{W\_Range} = \text{Prev\_W\_High} - \text{Prev\_W\_Low}$
+    - $\text{W\_VAH} = \text{W\_POC} + (\text{W\_Range} \times 0.35)$
+    - $\text{W\_VAL} = \text{W\_POC} - (\text{W\_Range} \times 0.35)$
+
+    ---
+
+    #### 7. Integrated Multi-Timeframe Confluence Filter (Section 8)
+    To ensure daily breakouts are supported by macro institutional order flow:
+    - **Bullish Confluence**: Daily Breakout ($Close > \text{PD\_VAH}$) supported by:
+      1. $\text{Close} > \text{W\_VAH}$ (Trading above Weekly Value Area High)
+      2. Weekly CPR Bias $\in [\text{"Bullish (Higher Value)"}, \text{"Breakout (Inside Value)"}]$
+    - **Bearish Confluence**: Daily Breakdown ($Close < \text{PD\_VAL}$) supported by:
+      1. $\text{Close} < \text{W\_VAL}$ (Trading below Weekly Value Area Low)
+      2. Weekly CPR Bias $\in [\text{"Bearish (Lower Value)"}, \text{"Breakout (Inside Value)"}]$
+
+    ---
+
+    #### 8. Bollinger Bands Squeeze & Volatility Expansion (Developer Spec)
     - **Middle Band (SMA20)**: 20-period Simple Moving Average of Close.
     - **Upper Band**: $\text{SMA20} + (\text{StdDev} \times 2.0)$
     - **Lower Band**: $\text{SMA20} - (\text{StdDev} \times 2.0)$
@@ -829,14 +915,14 @@ with tab7:
 
     ---
 
-    #### 5. Camarilla Pivots (Breakout Triggers)
+    #### 9. Camarilla Pivots (Breakout Triggers)
     - $\text{Range} = High - Low$
     - **H4 (Bullish Breakout)** = $Close + \text{Range} \times 0.55$
     - **L4 (Bearish Breakdown)** = $Close - \text{Range} \times 0.55$
     
     ---
 
-    #### 6. Trailing 52-Week Extremes
+    #### 10. Trailing 52-Week Extremes
     - **52W High**: Trailing 52-week highest traded price.
     - **52W Low**: Trailing 52-week lowest traded price.
     """)

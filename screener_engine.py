@@ -34,6 +34,8 @@ def fetch_and_screen(
     enable_rvol: bool = False,
     rvol_threshold: float = 1.5,
     enable_bbw_squeeze: bool = False,
+    enable_weekly_filter: bool = False,
+    enable_nr7_filter: bool = False,
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
@@ -299,6 +301,19 @@ def fetch_and_screen(
             "Prior_BBW_Contracting": quant_info["prior_is_contracting"],
             "RVOL_Status": f"🔥 {quant_info['rvol']}x" if quant_info['rvol'] >= rvol_threshold else f"{quant_info['rvol']}x",
             "BBW_Contract_Status": "⚡ Contracted" if quant_info["prior_is_contracting"] else "Normal",
+            # NR7 & OI Buildup (Section 5)
+            "Is_NR7": quant_info["is_nr7"],
+            "Prior_NR7": quant_info["prior_is_nr7"],
+            "NR7_Status": "⚡ NR7 (Coil)" if quant_info["is_nr7"] else ("Prior NR7" if quant_info["prior_is_nr7"] else "Normal"),
+            "OI_Buildup": quant_info["oi_buildup"],
+            # Weekly Context (Sections 6 & 7)
+            "W_Pivot": quant_info["w_pivot"],
+            "W_Top_CPR": quant_info["w_top_cpr"],
+            "W_Bottom_CPR": quant_info["w_bottom_cpr"],
+            "W_CPR_Bias": quant_info["w_cpr_bias"],
+            "W_VAH": quant_info["w_vah"],
+            "W_VAL": quant_info["w_val"],
+            "W_POC": quant_info["w_poc"],
             # Tomorrow's Projections
             "Next_CPR_Top": round(next_cpr_top, 2),
             "Next_CPR_Pivot": round(next_pivot, 2),
@@ -380,14 +395,30 @@ def fetch_and_screen(
     else:
         cond_bbw_contract = pd.Series(True, index=df.index)
 
+    # 8. Weekly Context Filters (Section 8 of PDF Specification)
+    if enable_weekly_filter:
+        cond_bull_weekly = (df["LTP"] > df["W_VAH"]) & df["W_CPR_Bias"].isin(["Bullish (Higher Value)", "Breakout (Inside Value)"])
+        cond_bear_weekly = (df["LTP"] < df["W_VAL"]) & df["W_CPR_Bias"].isin(["Bearish (Lower Value)", "Breakout (Inside Value)"])
+    else:
+        cond_bull_weekly = pd.Series(True, index=df.index)
+        cond_bear_weekly = pd.Series(True, index=df.index)
+
+    # 9. NR7 Compression Filter (Section 5 of PDF Specification)
+    if enable_nr7_filter:
+        cond_nr7 = df["Prior_NR7"] | df["Is_NR7"]
+    else:
+        cond_nr7 = pd.Series(True, index=df.index)
+
     # Final Combined Triggers
     df["Bullish_Breakout"] = (
         cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & 
-        cond_bull_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract
+        cond_bull_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract & 
+        cond_bull_weekly & cond_nr7
     )
     df["Bearish_Breakdown"] = (
         cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & 
-        cond_bear_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract
+        cond_bear_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract & 
+        cond_bear_weekly & cond_nr7
     )
 
     # Distance Metrics
@@ -397,6 +428,8 @@ def fetch_and_screen(
     df["Dist_52W_Low%"] = ((df["LTP"] - df["52W_Low"]) / df["52W_Low"] * 100.0).round(2)
     df["Dist_CPR_Top%"] = ((df["LTP"] - df["PD_CPR_Top"]) / df["PD_CPR_Top"] * 100.0).round(2)
     df["Dist_Cam_H4%"] = ((df["LTP"] - df["PD_Cam_H4"]) / df["PD_Cam_H4"] * 100.0).round(2)
+    df["Dist_W_VAH%"] = np.where(df["W_VAH"] > 0, ((df["LTP"] - df["W_VAH"]) / df["W_VAH"] * 100.0).round(2), 0.0)
+    df["Dist_W_VAL%"] = np.where(df["W_VAL"] > 0, ((df["LTP"] - df["W_VAL"]) / df["W_VAL"] * 100.0).round(2), 0.0)
 
     # Classify Signal Tag
     conditions = [
@@ -429,6 +462,10 @@ def fetch_and_screen(
     next_narrow_cpr_count = int(df["Next_Is_Narrow"].sum())
     rvol_pass_count = int((df["RVOL"] >= rvol_threshold).sum())
     bbw_contract_count = int(df["Prior_BBW_Contracting"].sum())
+    nr7_count = int(df["Is_NR7"].sum())
+    weekly_bull_count = int((df["W_CPR_Bias"] == "Bullish (Higher Value)").sum())
+    weekly_bear_count = int((df["W_CPR_Bias"] == "Bearish (Lower Value)").sum())
+    weekly_inside_count = int((df["W_CPR_Bias"] == "Breakout (Inside Value)").sum())
 
     meta = {
         "ref_date": ref_date_str,
@@ -441,13 +478,19 @@ def fetch_and_screen(
         "next_narrow_cpr_count": next_narrow_cpr_count,
         "rvol_pass_count": rvol_pass_count,
         "bbw_contract_count": bbw_contract_count,
+        "nr7_count": nr7_count,
+        "weekly_bull_count": weekly_bull_count,
+        "weekly_bear_count": weekly_bear_count,
+        "weekly_inside_count": weekly_inside_count,
         "only_narrow_cpr": only_narrow_cpr,
         "cpr_filter_active": enable_cpr_filter,
         "camarilla_filter_mode": camarilla_filter,
         "bollinger_filter_mode": bollinger_filter,
         "enable_rvol": enable_rvol,
         "rvol_threshold": rvol_threshold,
-        "enable_bbw_squeeze": enable_bbw_squeeze
+        "enable_bbw_squeeze": enable_bbw_squeeze,
+        "enable_weekly_filter": enable_weekly_filter,
+        "enable_nr7_filter": enable_nr7_filter
     }
 
     return all_df, bullish_df, bearish_df, meta
