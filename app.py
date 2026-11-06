@@ -25,7 +25,7 @@ importlib.reload(volume_profile)
 importlib.reload(quantitative_filters)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
-from screener_engine import fetch_and_screen, get_single_stock_chart_data
+from screener_engine import fetch_universe_data, apply_screener_filters, fetch_and_screen, get_single_stock_chart_data
 from chart_utils import create_breakout_chart
 
 
@@ -213,28 +213,12 @@ auto_refresh = st.sidebar.selectbox("Auto Refresh Interval", ["Off", "30 Seconds
 
 refresh_clicked = st.sidebar.button("🔄 Scan Now", **get_width_kw(st.button))
 
-# Helper function to cache screening data (cached for 60 seconds)
-@st.cache_data(ttl=60, show_spinner=False)
-def get_cached_screener_data(
-    syms, tf, h_prox, l_prox, cpr_flag, narrow_cpr_flag, narrow_max, cam_mode, bb_mode,
-    rvol_flag, rvol_thresh, bbw_squeeze_flag, weekly_flag, nr7_flag
-):
-    return fetch_and_screen(
-        syms, 
-        timeframe=tf, 
-        high_proximity_pct=h_prox, 
-        low_proximity_pct=l_prox,
-        enable_cpr_filter=cpr_flag,
-        only_narrow_cpr=narrow_cpr_flag,
-        narrow_cpr_max_pct=narrow_max,
-        camarilla_filter=cam_mode,
-        bollinger_filter=bb_mode,
-        enable_rvol=rvol_flag,
-        rvol_threshold=rvol_thresh,
-        enable_bbw_squeeze=bbw_squeeze_flag,
-        enable_weekly_filter=weekly_flag,
-        enable_nr7_filter=nr7_flag
-    )
+# Helper function to cache raw market data & indicator calculations
+# Heavy network fetch + indicator computation is cached by symbols & timeframe.
+# Vectorized filters are applied dynamically in memory in < 1 millisecond.
+@st.cache_data(ttl=90, show_spinner=False)
+def get_cached_raw_data(syms, tf):
+    return fetch_universe_data(syms, timeframe=tf)
 
 
 # Header & Market Status (Explicitly in Indian Standard Time - IST)
@@ -268,18 +252,33 @@ with col_time:
     """, unsafe_allow_html=True)
 
 # Execute Screening with progress feedback
-with st.spinner(f"Scanning {len(selected_symbols)} F&O stocks with Volume Profile, CPR, Camarilla, Bollinger & RVOL..."):
-    if refresh_clicked:
-        st.cache_data.clear()
-    all_df, bull_df, bear_df, meta = get_cached_screener_data(
-        selected_symbols, timeframe, high_proximity, low_proximity, enable_cpr, only_narrow_cpr, narrow_cpr_max, 
-        camarilla_mode, bollinger_filter, enable_rvol, rvol_threshold, enable_bbw_squeeze,
-        enable_weekly, enable_nr7
-    )
+if refresh_clicked:
+    st.cache_data.clear()
 
-if all_df.empty:
+with st.spinner(f"Fetching market data for {len(selected_symbols)} F&O stocks..."):
+    master_df, base_meta = get_cached_raw_data(selected_symbols, timeframe)
+
+if master_df.empty:
     st.warning("⚠️ No data was returned. Please verify your connection or refresh.")
     st.stop()
+
+# Instant in-memory filter execution (< 1ms)
+all_df, bull_df, bear_df, meta = apply_screener_filters(
+    master_df,
+    base_meta,
+    high_proximity_pct=high_proximity,
+    low_proximity_pct=low_proximity,
+    enable_cpr_filter=enable_cpr,
+    only_narrow_cpr=only_narrow_cpr,
+    narrow_cpr_max_pct=narrow_cpr_max,
+    camarilla_filter=camarilla_mode,
+    bollinger_filter=bollinger_filter,
+    enable_rvol=enable_rvol,
+    rvol_threshold=rvol_threshold,
+    enable_bbw_squeeze=enable_bbw_squeeze,
+    enable_weekly_filter=enable_weekly,
+    enable_nr7_filter=enable_nr7
+)
 
 # Extract squeezing stocks
 squeeze_df = all_df[all_df["BB_Is_Squeezing"]].sort_values(by="BB_Bandwidth%", ascending=True).copy()

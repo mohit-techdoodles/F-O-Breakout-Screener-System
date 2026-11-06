@@ -21,36 +21,17 @@ from bollinger_screener import calculate_bollinger_bands
 from quantitative_filters import get_quant_metrics_for_stock
 
 
-def fetch_and_screen(
+def fetch_universe_data(
     symbols: List[str], 
-    timeframe: str = "5m", 
-    high_proximity_pct: float = 0.95,
-    low_proximity_pct: float = 1.05,
-    enable_cpr_filter: bool = True,
-    only_narrow_cpr: bool = False,
-    narrow_cpr_max_pct: float = 0.35,
-    camarilla_filter: str = "None",
-    bollinger_filter: str = "None",
-    enable_rvol: bool = False,
-    rvol_threshold: float = 1.5,
-    enable_bbw_squeeze: bool = False,
-    enable_weekly_filter: bool = False,
-    enable_nr7_filter: bool = False,
-    **kwargs
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
+    timeframe: str = "5m"
+) -> Tuple[pd.DataFrame, Dict[str, any]]:
     """
-    Downloads intraday and 52-week data in batch, computes Volume Profile,
-    Central Pivot Range (CPR), Camarilla Pivots, and Bollinger Bands Squeeze.
-    
-    Screens for Bullish Breakout and Bearish Breakdown triggers with
-    multi-confluence validation.
-    
-    Returns:
-    - (all_df, bullish_df, bearish_df, meta_info)
+    Downloads market data and computes all indicators for all stocks.
+    This is the heavy network + compute function that should be cached.
     """
     if not symbols:
         empty = pd.DataFrame()
-        return empty, empty, empty, {}
+        return empty, {}
 
     yf_tickers = [get_yf_symbol(s) for s in symbols]
     ticker_to_sym = {get_yf_symbol(s): s for s in symbols}
@@ -199,7 +180,7 @@ def fetch_and_screen(
         else:
             cpr_type = "Wide"
 
-        is_narrow_cpr = pd_cpr_width_pct <= narrow_cpr_max_pct
+        is_narrow_cpr = pd_cpr_width_pct <= 0.35
 
         if ltp > pd_cpr_top:
             cpr_status = "🟢 Above CPR"
@@ -247,7 +228,7 @@ def fetch_and_screen(
         else:
             next_cpr_type = "Wide"
 
-        next_is_narrow = next_cpr_width_pct <= narrow_cpr_max_pct
+        next_is_narrow = next_cpr_width_pct <= 0.35
 
         # Tomorrow's Camarilla Levels
         next_cam_rng = day_high - day_low
@@ -299,7 +280,7 @@ def fetch_and_screen(
             "BBW_SMA20": quant_info["bbw_sma"],
             "BBW_Is_Contracting": quant_info["is_contracting"],
             "Prior_BBW_Contracting": quant_info["prior_is_contracting"],
-            "RVOL_Status": f"🔥 {quant_info['rvol']}x" if quant_info['rvol'] >= rvol_threshold else f"{quant_info['rvol']}x",
+            "RVOL_Status": f"🔥 {quant_info['rvol']}x" if quant_info['rvol'] >= 1.5 else f"{quant_info['rvol']}x",
             "BBW_Contract_Status": "⚡ Contracted" if quant_info["prior_is_contracting"] else "Normal",
             # NR7 & OI Buildup (Section 5)
             "Is_NR7": quant_info["is_nr7"],
@@ -331,12 +312,55 @@ def fetch_and_screen(
 
     if not records:
         empty = pd.DataFrame()
-        return empty, empty, empty, {"ref_date": ref_date_str, "live_date": live_date_str}
+        return empty, {"ref_date": ref_date_str, "live_date": live_date_str, "total_scanned": 0}
 
     df = pd.DataFrame(records)
 
-    # ----------------- VECTORIZED SCREENING LOGIC -----------------
-    
+    # Distance Metrics precalculated
+    df["Dist_VAH%"] = ((df["LTP"] - df["PD_VAH"]) / df["PD_VAH"] * 100.0).round(2)
+    df["Dist_VAL%"] = ((df["LTP"] - df["PD_VAL"]) / df["PD_VAL"] * 100.0).round(2)
+    df["Dist_52W_High%"] = ((df["LTP"] - df["52W_High"]) / df["52W_High"] * 100.0).round(2)
+    df["Dist_52W_Low%"] = ((df["LTP"] - df["52W_Low"]) / df["52W_Low"] * 100.0).round(2)
+    df["Dist_CPR_Top%"] = ((df["LTP"] - df["PD_CPR_Top"]) / df["PD_CPR_Top"] * 100.0).round(2)
+    df["Dist_Cam_H4%"] = ((df["LTP"] - df["PD_Cam_H4"]) / df["PD_Cam_H4"] * 100.0).round(2)
+    df["Dist_W_VAH%"] = np.where(df["W_VAH"] > 0, ((df["LTP"] - df["W_VAH"]) / df["W_VAH"] * 100.0).round(2), 0.0)
+    df["Dist_W_VAL%"] = np.where(df["W_VAL"] > 0, ((df["LTP"] - df["W_VAL"]) / df["W_VAL"] * 100.0).round(2), 0.0)
+
+    base_meta = {
+        "ref_date": ref_date_str,
+        "live_date": live_date_str,
+        "total_scanned": len(df)
+    }
+
+    return df, base_meta
+
+
+def apply_screener_filters(
+    master_df: pd.DataFrame,
+    base_meta: Dict[str, any],
+    high_proximity_pct: float = 0.95,
+    low_proximity_pct: float = 1.05,
+    enable_cpr_filter: bool = True,
+    only_narrow_cpr: bool = False,
+    narrow_cpr_max_pct: float = 0.35,
+    camarilla_filter: str = "None",
+    bollinger_filter: str = "None",
+    enable_rvol: bool = False,
+    rvol_threshold: float = 1.5,
+    enable_bbw_squeeze: bool = False,
+    enable_weekly_filter: bool = False,
+    enable_nr7_filter: bool = False,
+    **kwargs
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
+    """
+    Applies user filter conditions entirely in memory in < 1 millisecond.
+    """
+    if master_df.empty:
+        empty = pd.DataFrame()
+        return empty, empty, empty, base_meta
+
+    df = master_df.copy()
+
     # 1. Core Value Area & 52-Week Breakout Conditions
     cond_bull_vah = df["LTP"] > df["PD_VAH"]
     cond_bull_52w = df["LTP"] >= (df["52W_High"] * high_proximity_pct)
@@ -377,9 +401,9 @@ def fetch_and_screen(
         cond_bull_bb = pd.Series(True, index=df.index)
         cond_bear_bb = pd.Series(True, index=df.index)
 
-    # 5. Narrow CPR Filter
+    # 5. Narrow CPR Filter (dynamic threshold)
     if only_narrow_cpr:
-        cond_narrow_cpr = df["Is_Narrow_CPR"]
+        cond_narrow_cpr = df["PD_CPR_Width%"] <= narrow_cpr_max_pct
     else:
         cond_narrow_cpr = pd.Series(True, index=df.index)
 
@@ -421,16 +445,6 @@ def fetch_and_screen(
         cond_bear_weekly & cond_nr7
     )
 
-    # Distance Metrics
-    df["Dist_VAH%"] = ((df["LTP"] - df["PD_VAH"]) / df["PD_VAH"] * 100.0).round(2)
-    df["Dist_VAL%"] = ((df["LTP"] - df["PD_VAL"]) / df["PD_VAL"] * 100.0).round(2)
-    df["Dist_52W_High%"] = ((df["LTP"] - df["52W_High"]) / df["52W_High"] * 100.0).round(2)
-    df["Dist_52W_Low%"] = ((df["LTP"] - df["52W_Low"]) / df["52W_Low"] * 100.0).round(2)
-    df["Dist_CPR_Top%"] = ((df["LTP"] - df["PD_CPR_Top"]) / df["PD_CPR_Top"] * 100.0).round(2)
-    df["Dist_Cam_H4%"] = ((df["LTP"] - df["PD_Cam_H4"]) / df["PD_Cam_H4"] * 100.0).round(2)
-    df["Dist_W_VAH%"] = np.where(df["W_VAH"] > 0, ((df["LTP"] - df["W_VAH"]) / df["W_VAH"] * 100.0).round(2), 0.0)
-    df["Dist_W_VAL%"] = np.where(df["W_VAL"] > 0, ((df["LTP"] - df["W_VAL"]) / df["W_VAL"] * 100.0).round(2), 0.0)
-
     # Classify Signal Tag
     conditions = [
         df["Bullish_Breakout"],
@@ -458,7 +472,7 @@ def fetch_and_screen(
     all_df = df.sort_values(by="Symbol").reset_index(drop=True)
 
     squeezing_count = int(df["BB_Is_Squeezing"].sum())
-    narrow_cpr_count = int(df["Is_Narrow_CPR"].sum())
+    narrow_cpr_count = int((df["PD_CPR_Width%"] <= narrow_cpr_max_pct).sum())
     next_narrow_cpr_count = int(df["Next_Is_Narrow"].sum())
     rvol_pass_count = int((df["RVOL"] >= rvol_threshold).sum())
     bbw_contract_count = int(df["Prior_BBW_Contracting"].sum())
@@ -468,8 +482,8 @@ def fetch_and_screen(
     weekly_inside_count = int((df["W_CPR_Bias"] == "Breakout (Inside Value)").sum())
 
     meta = {
-        "ref_date": ref_date_str,
-        "live_date": live_date_str,
+        "ref_date": base_meta.get("ref_date", "N/A"),
+        "live_date": base_meta.get("live_date", "N/A"),
         "total_scanned": len(df),
         "bullish_count": len(bullish_df),
         "bearish_count": len(bearish_df),
@@ -494,6 +508,49 @@ def fetch_and_screen(
     }
 
     return all_df, bullish_df, bearish_df, meta
+
+
+def fetch_and_screen(
+    symbols: List[str], 
+    timeframe: str = "5m", 
+    high_proximity_pct: float = 0.95,
+    low_proximity_pct: float = 1.05,
+    enable_cpr_filter: bool = True,
+    only_narrow_cpr: bool = False,
+    narrow_cpr_max_pct: float = 0.35,
+    camarilla_filter: str = "None",
+    bollinger_filter: str = "None",
+    enable_rvol: bool = False,
+    rvol_threshold: float = 1.5,
+    enable_bbw_squeeze: bool = False,
+    enable_weekly_filter: bool = False,
+    enable_nr7_filter: bool = False,
+    **kwargs
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
+    """
+    Convenience wrapper that runs fetch_universe_data followed by apply_screener_filters.
+    Kept for complete backward compatibility.
+    """
+    df, base_meta = fetch_universe_data(symbols, timeframe=timeframe)
+    if df.empty:
+        return df, df, df, base_meta
+    return apply_screener_filters(
+        df,
+        base_meta,
+        high_proximity_pct=high_proximity_pct,
+        low_proximity_pct=low_proximity_pct,
+        enable_cpr_filter=enable_cpr_filter,
+        only_narrow_cpr=only_narrow_cpr,
+        narrow_cpr_max_pct=narrow_cpr_max_pct,
+        camarilla_filter=camarilla_filter,
+        bollinger_filter=bollinger_filter,
+        enable_rvol=enable_rvol,
+        rvol_threshold=rvol_threshold,
+        enable_bbw_squeeze=enable_bbw_squeeze,
+        enable_weekly_filter=enable_weekly_filter,
+        enable_nr7_filter=enable_nr7_filter,
+        **kwargs
+    )
 
 
 def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
