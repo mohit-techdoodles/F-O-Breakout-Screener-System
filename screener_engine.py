@@ -18,6 +18,7 @@ import yfinance as yf
 from fo_stocks import get_yf_symbol
 from volume_profile import calculate_volume_profile, get_profile_histogram
 from bollinger_screener import calculate_bollinger_bands
+from quantitative_filters import get_quant_metrics_for_stock
 
 
 def fetch_and_screen(
@@ -30,6 +31,9 @@ def fetch_and_screen(
     narrow_cpr_max_pct: float = 0.35,
     camarilla_filter: str = "None",
     bollinger_filter: str = "None",
+    enable_rvol: bool = False,
+    rvol_threshold: float = 1.5,
+    enable_bbw_squeeze: bool = False,
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
@@ -220,6 +224,36 @@ def fetch_and_screen(
         else:
             cam_status = "⚖️ Inside L3-H3"
 
+        # ----------------- Quantitative Filters (RVOL & BBW Contraction) -----------------
+        quant_info = get_quant_metrics_for_stock(sub_1y, curr_day_vol=day_vol)
+
+        # ----------------- Tomorrow's CPR & Camarilla (Next Session Projection) -----------------
+        next_pivot = (day_high + day_low + ltp) / 3.0
+        next_bc = (day_high + day_low) / 2.0
+        next_tc = (2.0 * next_pivot) - next_bc
+        next_cpr_top = max(next_tc, next_bc)
+        next_cpr_bottom = min(next_tc, next_bc)
+        next_cpr_width = abs(next_tc - next_bc)
+        next_cpr_width_pct = (next_cpr_width / next_pivot * 100.0) if next_pivot > 0 else 0.0
+
+        if next_cpr_width_pct <= 0.15:
+            next_cpr_type = "🎯 Ultra Narrow"
+        elif next_cpr_width_pct <= 0.35:
+            next_cpr_type = "⚡ Narrow"
+        elif next_cpr_width_pct <= 0.70:
+            next_cpr_type = "Average"
+        else:
+            next_cpr_type = "Wide"
+
+        next_is_narrow = next_cpr_width_pct <= narrow_cpr_max_pct
+
+        # Tomorrow's Camarilla Levels
+        next_cam_rng = day_high - day_low
+        next_cam_h4 = ltp + (next_cam_rng * 1.1 / 2.0)
+        next_cam_h3 = ltp + (next_cam_rng * 1.1 / 4.0)
+        next_cam_l3 = ltp - (next_cam_rng * 1.1 / 4.0)
+        next_cam_l4 = ltp - (next_cam_rng * 1.1 / 2.0)
+
         records.append({
             "Symbol": sym,
             "LTP": round(ltp, 2),
@@ -256,6 +290,27 @@ def fetch_and_screen(
             "BB_Status": bb_info["status"],
             "BB_Bull_Signal": bb_info["bullish_squeeze_signal"],
             "BB_Bear_Signal": bb_info["bearish_squeeze_signal"],
+            # Quantitative Filters (RVOL & BBW Contraction)
+            "RVOL": quant_info["rvol"],
+            "Volume_SMA20": quant_info["volume_sma"],
+            "BBW": quant_info["bbw"],
+            "BBW_SMA20": quant_info["bbw_sma"],
+            "BBW_Is_Contracting": quant_info["is_contracting"],
+            "Prior_BBW_Contracting": quant_info["prior_is_contracting"],
+            "RVOL_Status": f"🔥 {quant_info['rvol']}x" if quant_info['rvol'] >= rvol_threshold else f"{quant_info['rvol']}x",
+            "BBW_Contract_Status": "⚡ Contracted" if quant_info["prior_is_contracting"] else "Normal",
+            # Tomorrow's Projections
+            "Next_CPR_Top": round(next_cpr_top, 2),
+            "Next_CPR_Pivot": round(next_pivot, 2),
+            "Next_CPR_Bottom": round(next_cpr_bottom, 2),
+            "Next_CPR_Width": round(next_cpr_width, 2),
+            "Next_CPR_Width%": round(next_cpr_width_pct, 3),
+            "Next_CPR_Type": next_cpr_type,
+            "Next_Is_Narrow": next_is_narrow,
+            "Next_Cam_H4": round(next_cam_h4, 2),
+            "Next_Cam_H3": round(next_cam_h3, 2),
+            "Next_Cam_L3": round(next_cam_l3, 2),
+            "Next_Cam_L4": round(next_cam_l4, 2),
             "Ticker": t
         })
 
@@ -313,9 +368,27 @@ def fetch_and_screen(
     else:
         cond_narrow_cpr = pd.Series(True, index=df.index)
 
+    # 6. Quantitative Filter: Relative Volume (RVOL)
+    if enable_rvol:
+        cond_rvol = df["RVOL"] >= rvol_threshold
+    else:
+        cond_rvol = pd.Series(True, index=df.index)
+
+    # 7. Quantitative Filter: BBW Contraction (shift(1) check: contraction prior to breakout day)
+    if enable_bbw_squeeze:
+        cond_bbw_contract = df["Prior_BBW_Contracting"]
+    else:
+        cond_bbw_contract = pd.Series(True, index=df.index)
+
     # Final Combined Triggers
-    df["Bullish_Breakout"] = cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & cond_bull_bb & cond_narrow_cpr
-    df["Bearish_Breakdown"] = cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & cond_bear_bb & cond_narrow_cpr
+    df["Bullish_Breakout"] = (
+        cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & 
+        cond_bull_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract
+    )
+    df["Bearish_Breakdown"] = (
+        cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & 
+        cond_bear_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract
+    )
 
     # Distance Metrics
     df["Dist_VAH%"] = ((df["LTP"] - df["PD_VAH"]) / df["PD_VAH"] * 100.0).round(2)
@@ -353,6 +426,9 @@ def fetch_and_screen(
 
     squeezing_count = int(df["BB_Is_Squeezing"].sum())
     narrow_cpr_count = int(df["Is_Narrow_CPR"].sum())
+    next_narrow_cpr_count = int(df["Next_Is_Narrow"].sum())
+    rvol_pass_count = int((df["RVOL"] >= rvol_threshold).sum())
+    bbw_contract_count = int(df["Prior_BBW_Contracting"].sum())
 
     meta = {
         "ref_date": ref_date_str,
@@ -362,10 +438,16 @@ def fetch_and_screen(
         "bearish_count": len(bearish_df),
         "squeezing_count": squeezing_count,
         "narrow_cpr_count": narrow_cpr_count,
+        "next_narrow_cpr_count": next_narrow_cpr_count,
+        "rvol_pass_count": rvol_pass_count,
+        "bbw_contract_count": bbw_contract_count,
         "only_narrow_cpr": only_narrow_cpr,
         "cpr_filter_active": enable_cpr_filter,
         "camarilla_filter_mode": camarilla_filter,
-        "bollinger_filter_mode": bollinger_filter
+        "bollinger_filter_mode": bollinger_filter,
+        "enable_rvol": enable_rvol,
+        "rvol_threshold": rvol_threshold,
+        "enable_bbw_squeeze": enable_bbw_squeeze
     }
 
     return all_df, bullish_df, bearish_df, meta
@@ -425,10 +507,38 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
         "l4": round(prev_c - (cam_rng * 1.1 / 2.0), 2)
     }
 
-    # Bollinger Bands for daily
+    # Tomorrow's CPR & Camarilla Projection
+    curr_h = float(curr_df["High"].max())
+    curr_l = float(curr_df["Low"].min())
+    curr_c = float(curr_df["Close"].iloc[-1])
+    next_p = (curr_h + curr_l + curr_c) / 3.0
+    next_bc = (curr_h + curr_l) / 2.0
+    next_tc = (2.0 * next_p) - next_bc
+    next_w = abs(next_tc - next_bc)
+    next_w_pct = (next_w / next_p * 100.0) if next_p > 0 else 0.0
+    next_type = "🎯 Ultra Narrow" if next_w_pct <= 0.15 else ("⚡ Narrow" if next_w_pct <= 0.35 else ("Average" if next_w_pct <= 0.70 else "Wide"))
+    next_cpr = {
+        "top": round(max(next_tc, next_bc), 2),
+        "pivot": round(next_p, 2),
+        "bottom": round(min(next_tc, next_bc), 2),
+        "width": round(next_w, 2),
+        "width_pct": round(next_w_pct, 3),
+        "type": next_type
+    }
+    next_cam_rng = curr_h - curr_l
+    next_cam = {
+        "h4": round(curr_c + (next_cam_rng * 1.1 / 2.0), 2),
+        "h3": round(curr_c + (next_cam_rng * 1.1 / 4.0), 2),
+        "l3": round(curr_c - (next_cam_rng * 1.1 / 4.0), 2),
+        "l4": round(curr_c - (next_cam_rng * 1.1 / 2.0), 2)
+    }
+
+    # Quantitative Filters & Bollinger Bands for daily
+    quant = {}
     try:
         daily_df = yf.download(ticker, period="1y", interval="1d", progress=False)
         bb = calculate_bollinger_bands(daily_df)
+        quant = get_quant_metrics_for_stock(daily_df, curr_day_vol=float(curr_df["Volume"].sum()))
     except Exception:
         bb = {}
 
@@ -438,7 +548,10 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
         "vp": vp,
         "cpr": cpr,
         "cam": cam,
+        "next_cpr": next_cpr,
+        "next_cam": next_cam,
         "bb": bb,
+        "quant": quant,
         "bins": bins,
         "vols": vols,
         "prev_date": str(prev_date),

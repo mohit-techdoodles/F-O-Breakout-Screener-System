@@ -15,12 +15,14 @@ import screener_engine
 import chart_utils
 import bollinger_screener
 import volume_profile
+import quantitative_filters
 
 importlib.reload(fo_stocks)
 importlib.reload(screener_engine)
 importlib.reload(chart_utils)
 importlib.reload(bollinger_screener)
 importlib.reload(volume_profile)
+importlib.reload(quantitative_filters)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
 from screener_engine import fetch_and_screen, get_single_stock_chart_data
@@ -166,6 +168,32 @@ bollinger_filter = st.sidebar.selectbox(
     help="Squeeze Breakout: Squeeze in recent sessions + Close pushing beyond Upper/Lower Band."
 )
 
+# Quantitative Filters (RVOL & BBW Contraction - Technical Feature Spec)
+st.sidebar.markdown("---")
+st.sidebar.subheader("📊 Quantitative Filters")
+
+enable_rvol = st.sidebar.checkbox(
+    "Enable RVOL Filter",
+    value=False,
+    help="Filters for stocks experiencing institutional volume anomalies against their 20-day average."
+)
+rvol_threshold = 1.0
+if enable_rvol:
+    rvol_threshold = st.sidebar.slider(
+        "Minimum RVOL Multiplier",
+        min_value=1.0,
+        max_value=5.0,
+        value=1.5,
+        step=0.1,
+        help="Filters for volume X times the 20-day average volume."
+    )
+
+enable_bbw_squeeze = st.sidebar.checkbox(
+    "Require Volatility Contraction",
+    value=False,
+    help="Checks if Bollinger Bandwidth was tighter than its 20-day average on the prior session (T-1) before the breakout."
+)
+
 # Auto-refresh
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Live Refresh")
@@ -175,7 +203,10 @@ refresh_clicked = st.sidebar.button("🔄 Scan Now", **get_width_kw(st.button))
 
 # Helper function to cache screening data (cached for 60 seconds)
 @st.cache_data(ttl=60, show_spinner=False)
-def get_cached_screener_data(syms, tf, h_prox, l_prox, cpr_flag, narrow_cpr_flag, narrow_max, cam_mode, bb_mode):
+def get_cached_screener_data(
+    syms, tf, h_prox, l_prox, cpr_flag, narrow_cpr_flag, narrow_max, cam_mode, bb_mode,
+    rvol_flag, rvol_thresh, bbw_squeeze_flag
+):
     return fetch_and_screen(
         syms, 
         timeframe=tf, 
@@ -185,7 +216,10 @@ def get_cached_screener_data(syms, tf, h_prox, l_prox, cpr_flag, narrow_cpr_flag
         only_narrow_cpr=narrow_cpr_flag,
         narrow_cpr_max_pct=narrow_max,
         camarilla_filter=cam_mode,
-        bollinger_filter=bb_mode
+        bollinger_filter=bb_mode,
+        enable_rvol=rvol_flag,
+        rvol_threshold=rvol_thresh,
+        enable_bbw_squeeze=bbw_squeeze_flag
     )
 
 
@@ -220,11 +254,12 @@ with col_time:
     """, unsafe_allow_html=True)
 
 # Execute Screening with progress feedback
-with st.spinner(f"Scanning {len(selected_symbols)} F&O stocks with Volume Profile, CPR, Camarilla & Bollinger Squeeze..."):
+with st.spinner(f"Scanning {len(selected_symbols)} F&O stocks with Volume Profile, CPR, Camarilla, Bollinger & RVOL..."):
     if refresh_clicked:
         st.cache_data.clear()
     all_df, bull_df, bear_df, meta = get_cached_screener_data(
-        selected_symbols, timeframe, high_proximity, low_proximity, enable_cpr, only_narrow_cpr, narrow_cpr_max, camarilla_mode, bollinger_filter
+        selected_symbols, timeframe, high_proximity, low_proximity, enable_cpr, only_narrow_cpr, narrow_cpr_max, 
+        camarilla_mode, bollinger_filter, enable_rvol, rvol_threshold, enable_bbw_squeeze
     )
 
 if all_df.empty:
@@ -271,8 +306,8 @@ with m4:
 with m5:
     st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-lbl">Narrow CPR (Trending)</div>
-        <div class="metric-val" style="color: #FFB300;">{meta.get('narrow_cpr_count', 0)}</div>
+        <div class="metric-lbl">Tomorrow Narrow CPR</div>
+        <div class="metric-val" style="color: #FFB300;">{meta.get('next_narrow_cpr_count', 0)}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -292,9 +327,10 @@ with m6:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Main Navigation Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     f"🚀 Bullish Breakouts ({len(bull_df)})", 
     f"🔻 Bearish Breakdowns ({len(bear_df)})", 
+    f"🌅 Tomorrow's CPR Watchlist ({meta.get('next_narrow_cpr_count', 0)})",
     f"🌀 Squeeze Radar ({len(squeeze_df)})",
     "📈 Interactive Chart & Visualizer", 
     f"📋 All F&O Monitor ({len(all_df)})",
@@ -305,6 +341,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 with tab1:
     cpr_rule_txt = "✅ **CPR Money Zone:** `LTP > PD_CPR_Top`" if enable_cpr else "⚪ CPR Money Zone filter is optional/off"
     narrow_rule_txt = f"✅ **Narrow CPR Filter:** Active (≤ {narrow_cpr_max:.2f}%)" if only_narrow_cpr else "⚪ Narrow CPR filter is optional/off"
+    rvol_rule_txt = f"✅ **RVOL Filter:** Active (≥ {rvol_threshold:.1f}x)" if enable_rvol else "⚪ RVOL filter is optional/off"
+    bbw_rule_txt = "✅ **BBW Contraction:** Required on T-1" if enable_bbw_squeeze else "⚪ BBW Contraction is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
     
@@ -314,8 +352,10 @@ with tab1:
     > 2. **52-Week High Proximity:** `LTP >= 52W_High * {int(high_proximity*100)}%` (Trading within {100-int(high_proximity*100)}% of 52-Week High)  
     > 3. {cpr_rule_txt}  
     > 4. {narrow_rule_txt}  
-    > 5. {cam_rule_txt}  
-    > 6. {bb_rule_txt}  
+    > 5. {rvol_rule_txt}  
+    > 6. {bbw_rule_txt}  
+    > 7. {cam_rule_txt}  
+    > 8. {bb_rule_txt}  
     """)
     
     if bull_df.empty:
@@ -324,13 +364,15 @@ with tab1:
         st.success(f"🎯 Found **{len(bull_df)}** Bullish Breakout candidate(s)!")
         
         display_bull = bull_df[[
-            "Symbol", "LTP", "Chg%", "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
+            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
         
         display_bull = display_bull.rename(columns={
             "LTP": "LTP (₹)",
             "Chg%": "Day Chg %",
+            "RVOL": "RVOL (20D)",
+            "BBW_Contract_Status": "BBW Contraction",
             "PD_VAH": "Yesterday VAH (₹)",
             "Dist_VAH%": "% Above VAH",
             "52W_High": "52W High (₹)",
@@ -348,6 +390,7 @@ with tab1:
         styler = display_bull.style.format({
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
+            "RVOL (20D)": "{:.2f}x",
             "Yesterday VAH (₹)": "₹{:.2f}",
             "% Above VAH": "+{:.2f}%",
             "52W High (₹)": "₹{:.2f}",
@@ -376,6 +419,8 @@ with tab1:
 with tab2:
     cpr_rule_txt = "✅ **CPR Money Zone:** `LTP < PD_CPR_Bottom`" if enable_cpr else "⚪ CPR Money Zone filter is optional/off"
     narrow_rule_txt = f"✅ **Narrow CPR Filter:** Active (≤ {narrow_cpr_max:.2f}%)" if only_narrow_cpr else "⚪ Narrow CPR filter is optional/off"
+    rvol_rule_txt = f"✅ **RVOL Filter:** Active (≥ {rvol_threshold:.1f}x)" if enable_rvol else "⚪ RVOL filter is optional/off"
+    bbw_rule_txt = "✅ **BBW Contraction:** Required on T-1" if enable_bbw_squeeze else "⚪ BBW Contraction is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
 
@@ -385,8 +430,10 @@ with tab2:
     > 2. **52-Week Low Proximity:** `LTP <= 52W_Low * {int(low_proximity*100)}%` (Trading within {int(low_proximity*100)-100}% of 52-Week Low)  
     > 3. {cpr_rule_txt}  
     > 4. {narrow_rule_txt}  
-    > 5. {cam_rule_txt}  
-    > 6. {bb_rule_txt}  
+    > 5. {rvol_rule_txt}  
+    > 6. {bbw_rule_txt}  
+    > 7. {cam_rule_txt}  
+    > 8. {bb_rule_txt}  
     """)
     
     if bear_df.empty:
@@ -395,13 +442,15 @@ with tab2:
         st.error(f"🔻 Found **{len(bear_df)}** Bearish Breakdown candidate(s)!")
         
         display_bear = bear_df[[
-            "Symbol", "LTP", "Chg%", "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
+            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
         
         display_bear = display_bear.rename(columns={
             "LTP": "LTP (₹)",
             "Chg%": "Day Chg %",
+            "RVOL": "RVOL (20D)",
+            "BBW_Contract_Status": "BBW Contraction",
             "PD_VAL": "Yesterday VAL (₹)",
             "Dist_VAL%": "% Below VAL",
             "52W_Low": "52W Low (₹)",
@@ -419,6 +468,7 @@ with tab2:
         styler = display_bear.style.format({
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
+            "RVOL (20D)": "{:.2f}x",
             "Yesterday VAL (₹)": "₹{:.2f}",
             "% Below VAL": "{:.2f}%",
             "52W Low (₹)": "₹{:.2f}",
@@ -443,8 +493,108 @@ with tab2:
         )
 
 
-# ----------------- TAB 3: SQUEEZE RADAR (PRE-BREAKOUT WATCHLIST) -----------------
+# ----------------- TAB 3: TOMORROW'S CPR WATCHLIST (POST-MARKET PRE-PLANNER) -----------------
 with tab3:
+    st.subheader(f"🌅 Tomorrow's CPR & Camarilla Watchlist (Planning for {meta.get('live_date', 'Next Session')})")
+    st.markdown(f"""
+    > **Post-Market Determinism:**  
+    > Because today's market session has completed, today's High, Low, and Close define **tomorrow's institutional CPR and Camarilla levels with 100% certainty**.  
+    > *Use this pre-market radar every evening (after 3:30 PM IST) to identify which stocks will have **Ultra Narrow CPR** tomorrow. These stocks have the highest probability of explosive trending breakouts when tomorrow's opening bell rings.*
+    """)
+
+    # Controls inside Tab 3
+    cpr_col1, cpr_col2, cpr_col3 = st.columns([2, 2, 2])
+    with cpr_col1:
+        only_narrow_tomorrow = st.checkbox("🎯 Show Only Tomorrow's Narrow CPR (≤ 0.35%)", value=False)
+    with cpr_col2:
+        cpr_type_filter = st.selectbox(
+            "Filter by Tomorrow's CPR Classification",
+            ["All", "🎯 Ultra Narrow (≤ 0.15%)", "⚡ Narrow (≤ 0.35%)", "Average", "Wide"],
+            index=0
+        )
+    with cpr_col3:
+        sort_choice = st.selectbox("Sort Order", ["Tightest CPR First (Ascending)", "Widest CPR First (Descending)"], index=0)
+
+    # Filter dataframe
+    t_df = all_df.copy()
+    if only_narrow_tomorrow:
+        t_df = t_df[t_df["Next_Is_Narrow"]]
+    
+    if cpr_type_filter == "🎯 Ultra Narrow (≤ 0.15%)":
+        t_df = t_df[t_df["Next_CPR_Type"] == "🎯 Ultra Narrow"]
+    elif cpr_type_filter == "⚡ Narrow (≤ 0.35%)":
+        t_df = t_df[t_df["Next_CPR_Type"] == "⚡ Narrow"]
+    elif cpr_type_filter == "Average":
+        t_df = t_df[t_df["Next_CPR_Type"] == "Average"]
+    elif cpr_type_filter == "Wide":
+        t_df = t_df[t_df["Next_CPR_Type"] == "Wide"]
+
+    is_asc = (sort_choice == "Tightest CPR First (Ascending)")
+    t_df = t_df.sort_values(by="Next_CPR_Width%", ascending=is_asc).reset_index(drop=True)
+
+    # Quick metric summary
+    n_ultra = int((all_df["Next_CPR_Type"] == "🎯 Ultra Narrow").sum())
+    n_narrow = int((all_df["Next_CPR_Type"] == "⚡ Narrow").sum())
+    n_avg = int((all_df["Next_CPR_Type"] == "Average").sum())
+    n_wide = int((all_df["Next_CPR_Type"] == "Wide").sum())
+
+    sm1, sm2, sm3, sm4 = st.columns(4)
+    sm1.metric("🎯 Ultra Narrow (≤ 0.15%)", f"{n_ultra} Stocks", "Highest Trend Probability")
+    sm2.metric("⚡ Narrow (≤ 0.35%)", f"{n_narrow} Stocks", "Trending Potential")
+    sm3.metric("Average (0.35% - 0.70%)", f"{n_avg} Stocks", "Normal Volatility")
+    sm4.metric("Wide (> 0.70%)", f"{n_wide} Stocks", "Range-bound / Sideways")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if t_df.empty:
+        st.info("No stocks match the selected Tomorrow CPR filter.")
+    else:
+        disp_tomorrow = t_df[[
+            "Symbol", "LTP", "Chg%", "Next_CPR_Type", "Next_CPR_Width%", "Next_CPR_Top", 
+            "Next_CPR_Pivot", "Next_CPR_Bottom", "Next_Cam_H4", "Next_Cam_L4", "RVOL", "BBW_Contract_Status"
+        ]].copy()
+
+        disp_tomorrow = disp_tomorrow.rename(columns={
+            "LTP": "Today Close / LTP (₹)",
+            "Chg%": "Today Chg %",
+            "Next_CPR_Type": "Tomorrow CPR Type",
+            "Next_CPR_Width%": "Tomorrow CPR Width %",
+            "Next_CPR_Top": "Tomorrow CPR Top (₹)",
+            "Next_CPR_Pivot": "Tomorrow Pivot (₹)",
+            "Next_CPR_Bottom": "Tomorrow CPR Bot (₹)",
+            "Next_Cam_H4": "Tomorrow Cam H4 (₹)",
+            "Next_Cam_L4": "Tomorrow Cam L4 (₹)",
+            "RVOL": "Today RVOL",
+            "BBW_Contract_Status": "BBW Contraction"
+        })
+
+        st.dataframe(
+            disp_tomorrow.style.format({
+                "Today Close / LTP (₹)": "₹{:.2f}",
+                "Today Chg %": "{:+.2f}%",
+                "Tomorrow CPR Width %": "{:.3f}%",
+                "Tomorrow CPR Top (₹)": "₹{:.2f}",
+                "Tomorrow Pivot (₹)": "₹{:.2f}",
+                "Tomorrow CPR Bot (₹)": "₹{:.2f}",
+                "Tomorrow Cam H4 (₹)": "₹{:.2f}",
+                "Tomorrow Cam L4 (₹)": "₹{:.2f}",
+                "Today RVOL": "{:.2f}x"
+            }),
+            **get_width_kw(st.dataframe),
+            hide_index=True
+        )
+
+        csv_tomorrow = disp_tomorrow.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Tomorrow's CPR Levels as CSV",
+            data=csv_tomorrow,
+            file_name=f"tomorrow_cpr_levels_{meta.get('live_date', 'tomorrow')}.csv",
+            mime="text/csv"
+        )
+
+
+# ----------------- TAB 4: SQUEEZE RADAR (PRE-BREAKOUT WATCHLIST) -----------------
+with tab4:
     st.subheader("🌀 Bollinger Squeeze Radar (Volatility Compression Watchlist)")
     st.markdown("""
     > **Squeeze Definition (Developer Spec):**  
@@ -458,7 +608,7 @@ with tab3:
         st.markdown(f"**Found {len(squeeze_df)} stock(s) currently coiling in a tight Bollinger Squeeze:**")
         
         disp_squeeze = squeeze_df[[
-            "Symbol", "LTP", "Chg%", "BB_Bandwidth%", "BB_Min_Bandwidth%", "BB_Upper", "BB_Middle", "BB_Lower", "CPR_Status", "Signal"
+            "Symbol", "LTP", "Chg%", "BB_Bandwidth%", "BB_Min_Bandwidth%", "BB_Upper", "BB_Middle", "BB_Lower", "RVOL", "BBW_Contract_Status", "CPR_Status", "Signal"
         ]].copy()
         
         disp_squeeze = disp_squeeze.rename(columns={
@@ -469,6 +619,8 @@ with tab3:
             "BB_Upper": "Upper Band (₹)",
             "BB_Middle": "SMA20 (₹)",
             "BB_Lower": "Lower Band (₹)",
+            "RVOL": "RVOL",
+            "BBW_Contract_Status": "BBW Contraction",
             "CPR_Status": "CPR Status"
         })
         
@@ -480,15 +632,16 @@ with tab3:
                 "120D Min Bandwidth %": "{:.2f}%",
                 "Upper Band (₹)": "₹{:.2f}",
                 "SMA20 (₹)": "₹{:.2f}",
-                "Lower Band (₹)": "₹{:.2f}"
+                "Lower Band (₹)": "₹{:.2f}",
+                "RVOL": "{:.2f}x"
             }),
             **get_width_kw(st.dataframe),
             hide_index=True
         )
 
 
-# ----------------- TAB 4: INTERACTIVE CHART -----------------
-with tab4:
+# ----------------- TAB 5: INTERACTIVE CHART -----------------
+with tab5:
     st.subheader("📊 Stock Visualizer & Profile Analysis")
     
     default_chart_sym = all_df["Symbol"].iloc[0]
@@ -534,12 +687,31 @@ with tab4:
         c4.metric(f"CPR ({stock_row['CPR_Type']})", f"₹{stock_row['PD_CPR_Top']:.2f}", f"Width: {stock_row['PD_CPR_Width%']:.3f}%")
         c5.metric("Cam H4 / L4", f"₹{stock_row['PD_Cam_H4']:.2f}", f"L4: ₹{stock_row['PD_Cam_L4']:.2f}")
         c6.metric("BB Bandwidth", f"{stock_row['BB_Bandwidth%']:.2f}%", f"Min: {stock_row['BB_Min_Bandwidth%']:.2f}%")
+
+        # Tomorrow's Projections Banner
+        if "next_cpr" in chart_data and chart_data["next_cpr"]:
+            nc = chart_data["next_cpr"]
+            n_cam = chart_data.get("next_cam", {})
+            q = chart_data.get("quant", {})
+            st.markdown(f"""
+            <div style="background: rgba(33, 150, 243, 0.08); border: 1px solid #1e88e5; border-radius: 6px; padding: 10px 14px; margin-top: 10px;">
+                <span style="font-weight: 700; color: #29B6F6;">🌅 Projected Tomorrow's Levels (Post-Market):</span> &nbsp;
+                <b>CPR:</b> {nc.get('type')} ({nc.get('width_pct', 0):.3f}%) &nbsp;|&nbsp;
+                <b>Top:</b> ₹{nc.get('top')} &nbsp;|&nbsp;
+                <b>Pivot:</b> ₹{nc.get('pivot')} &nbsp;|&nbsp;
+                <b>Bot:</b> ₹{nc.get('bottom')} &nbsp;|&nbsp;
+                <b>Cam H4:</b> ₹{n_cam.get('h4')} &nbsp;|&nbsp;
+                <b>Cam L4:</b> ₹{n_cam.get('l4')} &nbsp;|&nbsp;
+                <b>RVOL:</b> {q.get('rvol', 1.0)}x &nbsp;|&nbsp;
+                <b>BBW Squeeze:</b> {"⚡ Yes" if q.get("prior_is_contracting") else "No"}
+            </div>
+            """, unsafe_allow_html=True)
     else:
         st.info("Candle data not available for this stock.")
 
 
-# ----------------- TAB 5: ALL F&O MONITOR -----------------
-with tab5:
+# ----------------- TAB 6: ALL F&O MONITOR -----------------
+with tab6:
     st.subheader(f"All Scanned F&O Stocks ({len(all_df)})")
     
     search_query = st.text_input("🔍 Filter by Stock Symbol", "").strip().upper()
@@ -548,14 +720,18 @@ with tab5:
         filter_df = filter_df[filter_df["Symbol"].str.contains(search_query)]
 
     display_all = filter_df[[
-        "Symbol", "LTP", "Chg%", "Signal", "PD_VAH", "Dist_VAH%", "PD_VAL", "Dist_VAL%", 
-        "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "52W_High", "Dist_52W_High%"
+        "Symbol", "LTP", "Chg%", "Signal", "RVOL", "BBW_Contract_Status", "Next_CPR_Type", "Next_CPR_Width%",
+        "PD_VAH", "Dist_VAH%", "PD_VAL", "Dist_VAL%", 
+        "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "PD_CPR_Bottom", 
+        "Cam_Status", "BB_Status", "BB_Bandwidth%", "52W_High", "Dist_52W_High%"
     ]].copy()
 
     st.dataframe(
         display_all.style.format({
             "LTP": "₹{:.2f}",
             "Chg%": "{:+.2f}%",
+            "RVOL": "{:.2f}x",
+            "Next_CPR_Width%": "{:.3f}%",
             "PD_VAH": "₹{:.2f}",
             "Dist_VAH%": "{:+.2f}%",
             "PD_VAL": "₹{:.2f}",
@@ -581,12 +757,12 @@ with tab5:
     )
 
 
-# ----------------- TAB 6: DOCUMENTATION -----------------
-with tab6:
+# ----------------- TAB 7: DOCUMENTATION -----------------
+with tab7:
     st.markdown(r"""
     ### 📖 Institutional Breakout Strategy & Confluence Framework
     
-    This screener tracks high-probability breakout momentum by combining **Volume Profile**, **Central Pivot Range (CPR / Money Zone)**, **Camarilla Pivots**, **Bollinger Bands Squeeze & Volatility Expansion**, and **Trailing 52-Week Extremes**.
+    This screener tracks high-probability breakout momentum by combining **Volume Profile**, **Central Pivot Range (CPR / Money Zone)**, **Camarilla Pivots**, **Bollinger Bands Squeeze & Volatility Expansion**, **Quantitative RVOL & BBW Contraction**, and **Trailing 52-Week Extremes**.
     
     ---
 
@@ -597,7 +773,7 @@ with tab6:
     
     ---
 
-    #### 2. Central Pivot Range (CPR / Money Zone) & Narrow CPR
+    #### 2. Central Pivot Range (CPR / Money Zone) & Tomorrow's Pre-Market Projection
     CPR defines the institutional fair-value zone:
     - **Pivot (P)** = $\frac{High + Low + Close}{3}$
     - **Bottom Central (BC)** = $\frac{High + Low}{2}$
@@ -618,9 +794,29 @@ with tab6:
     | **Average** | $0.35\% - 0.70\%$ | Moderate trending capability with standard intraday volatility. |
     | **Wide** | $> 0.70\%$ | Broad value area. **High likelihood of sideways / choppy / range-bound day.** Avoid breakout trades; prefer range reversals. |
 
+    ##### 🌅 Can we know Tomorrow's CPR after market closes?
+    **Yes, 100% definitively!** Because CPR relies exclusively on the High, Low, and Close of the session, once the market closes at 3:30 PM IST (and official settlement prices finalize by 3:45 PM IST), today's numbers are permanent. Tomorrow's CPR, Pivot, Top Central, Bottom Central, and Camarilla H4/L4 are fully locked and known before tomorrow's opening bell.
+
     ---
 
-    #### 3. Bollinger Bands Squeeze & Volatility Expansion (Developer Spec)
+    #### 3. Quantitative Filters (RVOL & Volatility Contraction)
+    *(Implemented from Developer Technical Feature Specification)*
+
+    ##### A. Relative Volume (RVOL):
+    - Measures current stock volume against its historical 20-period Simple Moving Average:
+      $$\text{RVOL} = \frac{\text{Current Volume}}{\text{SMA}_{20}(\text{Volume})}$$
+    - A breakout accompanied by high RVOL ($\ge 1.5\times$) confirms institutional participation and filters out low-probability retail traps.
+
+    ##### B. Bollinger Bandwidth (BBW) Contraction:
+    - Normalizes bandwidth as percentage:
+      $$\text{BBW} = \frac{\text{Upper Band} - \text{Lower Band}}{\text{SMA}_{20}(\text{Close})} \times 100$$
+    - Evaluates 20-period moving average of bandwidth: $\text{BBW\_SMA}_{20} = \text{SMA}_{20}(\text{BBW})$.
+    - Contraction condition: $\text{Is\_BBW\_Contracting} = (\text{BBW} < \text{BBW\_SMA}_{20})$.
+    - **Sequential Pipeline Rule:** Uses $\text{shift}(1)$ to verify that the bands were contracted on the day **prior** ($T-1$) to today's breakout day.
+
+    ---
+
+    #### 4. Bollinger Bands Squeeze & Volatility Expansion (Developer Spec)
     - **Middle Band (SMA20)**: 20-period Simple Moving Average of Close.
     - **Upper Band**: $\text{SMA20} + (\text{StdDev} \times 2.0)$
     - **Lower Band**: $\text{SMA20} - (\text{StdDev} \times 2.0)$
@@ -633,14 +829,14 @@ with tab6:
 
     ---
 
-    #### 4. Camarilla Pivots (Breakout Triggers)
+    #### 5. Camarilla Pivots (Breakout Triggers)
     - $\text{Range} = High - Low$
     - **H4 (Bullish Breakout)** = $Close + \text{Range} \times 0.55$
     - **L4 (Bearish Breakdown)** = $Close - \text{Range} \times 0.55$
     
     ---
 
-    #### 5. Trailing 52-Week Extremes
+    #### 6. Trailing 52-Week Extremes
     - **52W High**: Trailing 52-week highest traded price.
     - **52W Low**: Trailing 52-week lowest traded price.
     """)
