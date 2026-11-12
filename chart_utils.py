@@ -19,7 +19,8 @@ def create_breakout_chart(
     ltp: float,
     cpr: Optional[dict] = None,
     cam: Optional[dict] = None,
-    bb: Optional[dict] = None
+    bb: Optional[dict] = None,
+    mtf: Optional[dict] = None
 ) -> go.Figure:
     """
     Renders an institutional-grade Candlestick chart with:
@@ -221,6 +222,75 @@ def create_breakout_chart(
             annotation_font=dict(color="#AB47BC", size=10),
             row=1, col=1
         )
+
+    # MTF Breakout Algorithm Levels (PDH, PDL, 1H Close, 15m VWAP)
+    if mtf:
+        # 1. 15m Anchored VWAP line
+        vwap_series = mtf.get("vwap_series")
+        if vwap_series is not None and len(vwap_series) > 0:
+            fig.add_trace(
+                go.Scatter(
+                    x=vwap_series.index,
+                    y=vwap_series.values,
+                    mode="lines",
+                    name="15m VWAP",
+                    line=dict(color="#2979FF", width=2)
+                ),
+                row=1, col=1
+            )
+        elif mtf.get("vwap") and not np.isnan(mtf.get("vwap")):
+            fig.add_hline(
+                y=mtf.get("vwap"),
+                line_dash="solid",
+                line_color="#2979FF",
+                line_width=1.5,
+                annotation_text=f"15m VWAP (₹{mtf.get('vwap')})",
+                annotation_position="right",
+                annotation_font=dict(color="#2979FF", size=10),
+                row=1, col=1
+            )
+
+        # 2. PDH (Previous Day High)
+        pdh_val = mtf.get("pdh")
+        if pdh_val and not np.isnan(pdh_val):
+            fig.add_hline(
+                y=pdh_val,
+                line_dash="dash",
+                line_color="#00E676",
+                line_width=1.5,
+                annotation_text=f"PDH (₹{pdh_val})",
+                annotation_position="top left",
+                annotation_font=dict(color="#00E676", size=10),
+                row=1, col=1
+            )
+
+        # 3. PDL (Previous Day Low)
+        pdl_val = mtf.get("pdl")
+        if pdl_val and not np.isnan(pdl_val):
+            fig.add_hline(
+                y=pdl_val,
+                line_dash="dash",
+                line_color="#FF5252",
+                line_width=1.5,
+                annotation_text=f"PDL (₹{pdl_val})",
+                annotation_position="bottom left",
+                annotation_font=dict(color="#FF5252", size=10),
+                row=1, col=1
+            )
+
+        # 4. First 1-Hour Close (at 10:15 AM IST)
+        h1_close = mtf.get("first_1h_close")
+        if h1_close and not np.isnan(h1_close):
+            fig.add_hline(
+                y=h1_close,
+                line_dash="dot",
+                line_color="#D500F9",
+                line_width=1.5,
+                annotation_text=f"1H Close (₹{h1_close})",
+                annotation_position="top right",
+                annotation_font=dict(color="#D500F9", size=10),
+                row=1, col=1
+            )
 
     # Layout styling (Dark terminal theme)
     fig.update_layout(

@@ -16,6 +16,7 @@ import chart_utils
 import bollinger_screener
 import volume_profile
 import quantitative_filters
+import mtf_breakout
 
 importlib.reload(fo_stocks)
 importlib.reload(screener_engine)
@@ -23,10 +24,12 @@ importlib.reload(chart_utils)
 importlib.reload(bollinger_screener)
 importlib.reload(volume_profile)
 importlib.reload(quantitative_filters)
+importlib.reload(mtf_breakout)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
 from screener_engine import fetch_universe_data, apply_screener_filters, fetch_and_screen, get_single_stock_chart_data
 from chart_utils import create_breakout_chart
+from mtf_breakout import PINE_SCRIPT_V5_CODE
 
 
 def get_width_kw(fn):
@@ -120,6 +123,12 @@ low_proximity = st.sidebar.slider(
     help="Default 105% means LTP must be within 5% of the 52-Week Low"
 ) / 100.0
 
+ignore_52w = st.sidebar.checkbox(
+    "🔓 Irrespective of 52-Week High/Low (Show All Breakouts)",
+    value=False,
+    help="When enabled, bypasses the 52-Week High/Low proximity requirement so all valid breakouts across the universe are shown."
+)
+
 # Pivot & Money Zone Criteria
 st.sidebar.markdown("---")
 st.sidebar.subheader("📐 Pivot & Money Zone Criteria")
@@ -206,6 +215,42 @@ enable_nr7 = st.sidebar.checkbox(
     help="Section 5: Filters for stocks where today or yesterday recorded the narrowest daily range of the last 7 sessions."
 )
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎯 MTF & Initial Hour (1H) Filters")
+enable_mtf = st.sidebar.checkbox(
+    "Require MTF Breakout (1H & VWAP)",
+    value=False,
+    help="Developer Guide MTF Algorithm: Bullish requires 1H Close (10:15) > PDH & LTP > VWAP. Bearish requires 1H Close < PDL & LTP < VWAP."
+)
+mtf_mode = "Any / Both"
+if enable_mtf:
+    mtf_mode = st.sidebar.selectbox(
+        "MTF Filter Direction",
+        ["Any / Both", "Bullish (1H > PDH & Above VWAP)", "Bearish (1H < PDL & Below VWAP)"],
+        index=0
+    )
+
+h1_filter = st.sidebar.selectbox(
+    "Initial Hour (1H) Breakout / Break-in",
+    [
+        "All / Off",
+        # Option A: 1H Close vs Prev 1H Close
+        "Option A: Breakout > Prev 1H (Bullish)",
+        "Option A: Breakdown < Prev 1H (Bearish)",
+        "Option A: Break-in (Inside Prev 1H)",
+        # Option B: Live Price vs 1H Close
+        "Option B: Price > 1H Close (Bullish)",
+        "Option B: Price < 1H Close (Bearish)",
+        "Option B: Break-in (Failed 1H Close Breakout)",
+        # Option C: 1H Range (Initial Balance High/Low)
+        "Option C: Range Breakout > 1H High (Bullish)",
+        "Option C: Range Breakdown < 1H Low (Bearish)",
+        "Option C: Range Break-in (Failed Breakout / Re-entered Range)"
+    ],
+    index=0,
+    help="Select Option A (1H Close vs Prev 1H Close), Option B (Live Price vs 1H Close), or Option C (Initial Balance 1H Range Breakout or Break-in)."
+)
+
 # Auto-refresh
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Live Refresh")
@@ -239,7 +284,7 @@ market_open = (
 col_title, col_time = st.columns([3, 1])
 with col_title:
     st.title("📈 F&O Breakout & Volatility Screener")
-    st.caption("Strategy: Volume Profile (VAH/VAL) + CPR Money Zone + Camarilla + Bollinger Bands Squeeze")
+    st.caption("Strategy: Volume Profile (VAH/VAL) + CPR Money Zone + Camarilla + Bollinger Bands Squeeze + MTF Breakout")
 
 with col_time:
     status_color = "#00E676" if market_open else "#FF9100"
@@ -268,6 +313,8 @@ all_df, bull_df, bear_df, meta = apply_screener_filters(
     base_meta,
     high_proximity_pct=high_proximity,
     low_proximity_pct=low_proximity,
+    ignore_52w=ignore_52w,
+    h1_close_filter=h1_filter,
     enable_cpr_filter=enable_cpr,
     only_narrow_cpr=only_narrow_cpr,
     narrow_cpr_max_pct=narrow_cpr_max,
@@ -277,11 +324,16 @@ all_df, bull_df, bear_df, meta = apply_screener_filters(
     rvol_threshold=rvol_threshold,
     enable_bbw_squeeze=enable_bbw_squeeze,
     enable_weekly_filter=enable_weekly,
-    enable_nr7_filter=enable_nr7
+    enable_nr7_filter=enable_nr7,
+    enable_mtf_filter=enable_mtf,
+    mtf_mode=mtf_mode
 )
 
-# Extract squeezing stocks
+# Extract squeezing & MTF stocks
 squeeze_df = all_df[all_df["BB_Is_Squeezing"]].sort_values(by="BB_Bandwidth%", ascending=True).copy()
+mtf_bull_df = all_df[all_df["MTF_Bullish"]].sort_values(by="Dist_VWAP%", ascending=False).copy()
+mtf_bear_df = all_df[all_df["MTF_Bearish"]].sort_values(by="Dist_VWAP%", ascending=True).copy()
+mtf_total_count = len(mtf_bull_df) + len(mtf_bear_df)
 
 # Top Metric Cards Row
 m1, m2, m3, m4, m5, m6 = st.columns(6)
@@ -340,10 +392,55 @@ with m6:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# Secondary Metric Cards (Quantitative & MTF Overview)
+q1, q2, q3, q4, q5 = st.columns(5)
+with q1:
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 3px solid #00E676;">
+        <div class="metric-lbl">🎯 MTF Bullish (1H > PDH)</div>
+        <div class="metric-val" style="color: #00E676; font-size: 20px;">{meta.get('mtf_bull_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with q2:
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 3px solid #FF5252;">
+        <div class="metric-lbl">🎯 MTF Bearish (1H < PDL)</div>
+        <div class="metric-val" style="color: #FF5252; font-size: 20px;">{meta.get('mtf_bear_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with q3:
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 3px solid #FFA726;">
+        <div class="metric-lbl">🔥 High RVOL (≥ 1.5x)</div>
+        <div class="metric-val" style="color: #FFA726; font-size: 20px;">{meta.get('rvol_pass_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with q4:
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 3px solid #29B6F6;">
+        <div class="metric-lbl">⚡ Prior BBW Contracted</div>
+        <div class="metric-val" style="color: #29B6F6; font-size: 20px;">{meta.get('bbw_contract_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with q5:
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 3px solid #AB47BC;">
+        <div class="metric-lbl">📦 NR7 Coiled (Today)</div>
+        <div class="metric-val" style="color: #AB47BC; font-size: 20px;">{meta.get('nr7_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
 # Main Navigation Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab_mtf, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     f"🚀 Bullish Breakouts ({len(bull_df)})", 
     f"🔻 Bearish Breakdowns ({len(bear_df)})", 
+    f"🎯 MTF Breakouts ({mtf_total_count})",
     f"🌅 Tomorrow's CPR Watchlist ({meta.get('next_narrow_cpr_count', 0)})",
     f"🌀 Squeeze Radar ({len(squeeze_df)})",
     "📈 Interactive Chart & Visualizer", 
@@ -361,6 +458,7 @@ with tab1:
     nr7_rule_txt = "✅ **NR7 Volatility Compression:** Required on T-1 or T0" if enable_nr7 else "⚪ NR7 compression filter is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
+    mtf_rule_txt = f"✅ **MTF Breakout Filter:** Active ({mtf_mode})" if enable_mtf else "⚪ MTF Breakout filter is optional/off"
     
     st.markdown(f"""
     > **Bullish Setup Confluence Rules:**  
@@ -374,6 +472,7 @@ with tab1:
     > 8. {nr7_rule_txt}  
     > 9. {cam_rule_txt}  
     > 10. {bb_rule_txt}  
+    > 11. {mtf_rule_txt}  
     """)
     
     if bull_df.empty:
@@ -382,7 +481,7 @@ with tab1:
         st.success(f"🎯 Found **{len(bull_df)}** Bullish Breakout candidate(s)!")
         
         display_bull = bull_df[[
-            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAH", "Dist_W_VAH%", 
+            "Symbol", "LTP", "Chg%", "MTF_Signal", "First_1H_Close", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAH", "Dist_W_VAH%", 
             "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
@@ -390,6 +489,8 @@ with tab1:
         display_bull = display_bull.rename(columns={
             "LTP": "LTP (₹)",
             "Chg%": "Day Chg %",
+            "MTF_Signal": "MTF Signal",
+            "First_1H_Close": "1H Close (10:15) ₹",
             "RVOL": "RVOL (20D)",
             "BBW_Contract_Status": "BBW Contraction",
             "NR7_Status": "NR7 Status",
@@ -413,6 +514,7 @@ with tab1:
         styler = display_bull.style.format({
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
+            "1H Close (10:15) ₹": "₹{:.2f}",
             "RVOL (20D)": "{:.2f}x",
             "Weekly VAH (₹)": "₹{:.2f}",
             "% vs W_VAH": "{:+.2f}%",
@@ -450,6 +552,7 @@ with tab2:
     nr7_rule_txt = "✅ **NR7 Volatility Compression:** Required on T-1 or T0" if enable_nr7 else "⚪ NR7 compression filter is optional/off"
     cam_rule_txt = f"✅ **Camarilla:** Active ({camarilla_mode})" if camarilla_mode != "None" else "⚪ Camarilla filter is optional/off"
     bb_rule_txt = f"✅ **Bollinger Filter:** Active ({bollinger_filter})" if bollinger_filter != "None" else "⚪ Bollinger filter is optional/off"
+    mtf_rule_txt = f"✅ **MTF Breakout Filter:** Active ({mtf_mode})" if enable_mtf else "⚪ MTF Breakout filter is optional/off"
 
     st.markdown(f"""
     > **Bearish Setup Confluence Rules:**  
@@ -463,6 +566,7 @@ with tab2:
     > 8. {nr7_rule_txt}  
     > 9. {cam_rule_txt}  
     > 10. {bb_rule_txt}  
+    > 11. {mtf_rule_txt}  
     """)
     
     if bear_df.empty:
@@ -471,7 +575,7 @@ with tab2:
         st.error(f"🔻 Found **{len(bear_df)}** Bearish Breakdown candidate(s)!")
         
         display_bear = bear_df[[
-            "Symbol", "LTP", "Chg%", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAL", "Dist_W_VAL%",
+            "Symbol", "LTP", "Chg%", "MTF_Signal", "First_1H_Close", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAL", "Dist_W_VAL%",
             "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
@@ -479,6 +583,8 @@ with tab2:
         display_bear = display_bear.rename(columns={
             "LTP": "LTP (₹)",
             "Chg%": "Day Chg %",
+            "MTF_Signal": "MTF Signal",
+            "First_1H_Close": "1H Close (10:15) ₹",
             "RVOL": "RVOL (20D)",
             "BBW_Contract_Status": "BBW Contraction",
             "NR7_Status": "NR7 Status",
@@ -502,6 +608,7 @@ with tab2:
         styler = display_bear.style.format({
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
+            "1H Close (10:15) ₹": "₹{:.2f}",
             "RVOL (20D)": "{:.2f}x",
             "Weekly VAL (₹)": "₹{:.2f}",
             "% vs W_VAL": "{:+.2f}%",
@@ -527,6 +634,123 @@ with tab2:
             **get_width_kw(st.dataframe),
             hide_index=True
         )
+
+
+# ----------------- TAB MTF: MULTI-TIMEFRAME BREAKOUT STRATEGY -----------------
+with tab_mtf:
+    st.subheader("🎯 Multi-Timeframe (MTF) Breakout Strategy")
+    st.caption("First-Hour (10:15 AM IST) Closes vs Daily PDH/PDL + 15-Minute Daily Anchored VWAP")
+
+    st.markdown(r"""
+    > **Multi-Timeframe Architecture:**
+    > 1. **Daily Timeframe:** Captures Previous Day High (PDH) and Previous Day Low (PDL) shifted by 1 to prevent lookahead bias.
+    > 2. **1-Hour Timeframe:** Captures the closing price of the first 60 minutes (4th 15-minute candle at **10:15 AM IST**) $\rightarrow \text{First\_1H\_Close}$.
+    > 3. **15-Minute Timeframe:** Calculates institutional Daily Anchored VWAP ($\frac{\text{High} + \text{Low} + \text{Close}}{3}$).
+    > 
+    > * 🟢 **Bullish Breakout:** $\text{First\_1H\_Close} > \text{PDH}$ **AND** $\text{Current 15m Close} > \text{VWAP}$
+    > * 🔴 **Bearish Breakdown:** $\text{First\_1H\_Close} < \text{PDL}$ **AND** $\text{Current 15m Close} < \text{VWAP}$
+    """)
+
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        st.markdown(f"#### 🚀 Bullish MTF Breakouts ({len(mtf_bull_df)})")
+        if mtf_bull_df.empty:
+            st.info("ℹ️ No stocks currently have a First-Hour close above PDH while holding above intraday VWAP.")
+        else:
+            display_m_bull = mtf_bull_df[[
+                "Symbol", "LTP", "Chg%", "First_1H_Close", "PDH", "VWAP", "Dist_VWAP%", "MTF_1H_Status", "MTF_VWAP_Status"
+            ]].copy().rename(columns={
+                "LTP": "LTP (₹)",
+                "Chg%": "Day Chg %",
+                "First_1H_Close": "1H Close (10:15) ₹",
+                "PDH": "Prev Day High ₹",
+                "VWAP": "15m VWAP ₹",
+                "Dist_VWAP%": "% vs VWAP",
+                "MTF_1H_Status": "1H Status",
+                "MTF_VWAP_Status": "VWAP Status"
+            })
+            st.dataframe(
+                display_m_bull.style.format({
+                    "LTP (₹)": "₹{:.2f}",
+                    "Day Chg %": "{:+.2f}%",
+                    "1H Close (10:15) ₹": "₹{:.2f}",
+                    "Prev Day High ₹": "₹{:.2f}",
+                    "15m VWAP ₹": "₹{:.2f}",
+                    "% vs VWAP": "{:+.2f}%"
+                }),
+                **get_width_kw(st.dataframe),
+                hide_index=True
+            )
+
+    with col_m2:
+        st.markdown(f"#### 🔻 Bearish MTF Breakdowns ({len(mtf_bear_df)})")
+        if mtf_bear_df.empty:
+            st.info("ℹ️ No stocks currently have a First-Hour close below PDL while holding below intraday VWAP.")
+        else:
+            display_m_bear = mtf_bear_df[[
+                "Symbol", "LTP", "Chg%", "First_1H_Close", "PDL", "VWAP", "Dist_VWAP%", "MTF_1H_Status", "MTF_VWAP_Status"
+            ]].copy().rename(columns={
+                "LTP": "LTP (₹)",
+                "Chg%": "Day Chg %",
+                "First_1H_Close": "1H Close (10:15) ₹",
+                "PDL": "Prev Day Low ₹",
+                "VWAP": "15m VWAP ₹",
+                "Dist_VWAP%": "% vs VWAP",
+                "MTF_1H_Status": "1H Status",
+                "MTF_VWAP_Status": "VWAP Status"
+            })
+            st.dataframe(
+                display_m_bear.style.format({
+                    "LTP (₹)": "₹{:.2f}",
+                    "Day Chg %": "{:+.2f}%",
+                    "1H Close (10:15) ₹": "₹{:.2f}",
+                    "Prev Day Low ₹": "₹{:.2f}",
+                    "15m VWAP ₹": "₹{:.2f}",
+                    "% vs VWAP": "{:+.2f}%"
+                }),
+                **get_width_kw(st.dataframe),
+                hide_index=True
+            )
+
+    # All Stocks MTF Status Monitor Table
+    st.markdown("#### 📋 All Stocks — MTF & Initial Hour (1H) Status Monitor (Options A, B & C)")
+    display_mtf_all = all_df[[
+        "Symbol", "LTP", "Chg%", "MTF_Signal", "Opt_A_Status", "Prev_1H_Close", "Curr_1H_Close", 
+        "Opt_B_Status", "Opt_C_Status", "Curr_1H_High", "Curr_1H_Low", "VWAP", "Dist_VWAP%"
+    ]].copy().rename(columns={
+        "LTP": "LTP (₹)",
+        "Chg%": "Day Chg %",
+        "MTF_Signal": "MTF Signal",
+        "Opt_A_Status": "Option A (1H vs Prev 1H)",
+        "Prev_1H_Close": "Prev 1H Close ₹",
+        "Curr_1H_Close": "Today 1H Close ₹",
+        "Opt_B_Status": "Option B (Live vs 1H Close)",
+        "Opt_C_Status": "Option C (1H Range IB)",
+        "Curr_1H_High": "1H High ₹",
+        "Curr_1H_Low": "1H Low ₹",
+        "VWAP": "VWAP ₹",
+        "Dist_VWAP%": "% vs VWAP"
+    })
+    st.dataframe(
+        display_mtf_all.style.format({
+            "LTP (₹)": "₹{:.2f}",
+            "Day Chg %": "{:+.2f}%",
+            "Prev 1H Close ₹": "₹{:.2f}",
+            "Today 1H Close ₹": "₹{:.2f}",
+            "1H High ₹": "₹{:.2f}",
+            "1H Low ₹": "₹{:.2f}",
+            "VWAP ₹": "₹{:.2f}",
+            "% vs VWAP": "{:+.2f}%"
+        }),
+        **get_width_kw(st.dataframe),
+        hide_index=True
+    )
+
+    with st.expander("📜 TradingView Pine Script (v5) Code & Integration Guide"):
+        st.markdown("""
+        Copy and paste this script directly into **TradingView Pine Editor (v5)** to display the MTF Breakout indicators and VWAP overlays on your 15-minute charts:
+        """)
+        st.code(PINE_SCRIPT_V5_CODE, language="pinescript")
 
 
 # ----------------- TAB 3: TOMORROW'S CPR WATCHLIST (POST-MARKET PRE-PLANNER) -----------------
@@ -711,7 +935,8 @@ with tab5:
             ltp=stock_row["LTP"],
             cpr=chart_data.get("cpr"),
             cam=chart_data.get("cam"),
-            bb=chart_data.get("bb")
+            bb=chart_data.get("bb"),
+            mtf=chart_data.get("mtf")
         )
         st.plotly_chart(fig, **get_width_kw(st.plotly_chart))
         
@@ -723,6 +948,24 @@ with tab5:
         c4.metric(f"CPR ({stock_row['CPR_Type']})", f"₹{stock_row['PD_CPR_Top']:.2f}", f"Width: {stock_row['PD_CPR_Width%']:.3f}%")
         c5.metric("Cam H4 / L4", f"₹{stock_row['PD_Cam_H4']:.2f}", f"L4: ₹{stock_row['PD_Cam_L4']:.2f}")
         c6.metric("BB Bandwidth", f"{stock_row['BB_Bandwidth%']:.2f}%", f"Min: {stock_row['BB_Min_Bandwidth%']:.2f}%")
+
+        # MTF Indicator Banner
+        m_stat = stock_row.get("MTF_Signal", "None")
+        h1_c = stock_row.get("First_1H_Close", 0.0)
+        vwap_val = stock_row.get("VWAP", 0.0)
+        pdh_val = stock_row.get("PDH", 0.0)
+        pdl_val = stock_row.get("PDL", 0.0)
+        st.markdown(f"""
+        <div style="background: rgba(156, 39, 176, 0.08); border: 1px solid #ab47bc; border-radius: 6px; padding: 10px 14px; margin-top: 10px;">
+            <span style="font-weight: 700; color: #E040FB;">🎯 MTF Breakout Algorithm Levels:</span> &nbsp;
+            <b>Signal:</b> {m_stat} &nbsp;|&nbsp;
+            <b>1H Close (10:15):</b> ₹{h1_c} &nbsp;|&nbsp;
+            <b>15m VWAP:</b> ₹{vwap_val} ({stock_row.get('MTF_VWAP_Status', 'N/A')}) &nbsp;|&nbsp;
+            <b>PDH:</b> ₹{pdh_val} &nbsp;|&nbsp;
+            <b>PDL:</b> ₹{pdl_val} &nbsp;|&nbsp;
+            <b>1H Status:</b> {stock_row.get('MTF_1H_Status', 'N/A')}
+        </div>
+        """, unsafe_allow_html=True)
 
         # Tomorrow's Projections Banner
         if "next_cpr" in chart_data and chart_data["next_cpr"]:
@@ -760,7 +1003,8 @@ with tab6:
         filter_df = filter_df[filter_df["Symbol"].str.contains(search_query)]
 
     display_all = filter_df[[
-        "Symbol", "LTP", "Chg%", "Signal", "RVOL", "BBW_Contract_Status", "NR7_Status", 
+        "Symbol", "LTP", "Chg%", "Signal", "MTF_Signal", "MTF_1H_Status", "First_1H_Close", "VWAP",
+        "RVOL", "BBW_Contract_Status", "NR7_Status", 
         "W_CPR_Bias", "W_VAH", "W_VAL", "Next_CPR_Type", "Next_CPR_Width%",
         "PD_VAH", "Dist_VAH%", "PD_VAL", "Dist_VAL%", 
         "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "PD_CPR_Bottom", 
@@ -771,6 +1015,8 @@ with tab6:
         display_all.style.format({
             "LTP": "₹{:.2f}",
             "Chg%": "{:+.2f}%",
+            "First_1H_Close": "₹{:.2f}",
+            "VWAP": "₹{:.2f}",
             "RVOL": "{:.2f}x",
             "W_VAH": "₹{:.2f}",
             "W_VAL": "₹{:.2f}",
@@ -924,7 +1170,38 @@ with tab7:
     #### 10. Trailing 52-Week Extremes
     - **52W High**: Trailing 52-week highest traded price.
     - **52W Low**: Trailing 52-week lowest traded price.
+    
+    ---
+
+    #### 11. Multi-Timeframe (MTF) Breakout Algorithm (Developer Guide Spec)
+    Synthesizes three distinct timeframes on a single execution chart:
+    - **Daily Timeframe**: Tracks Previous Day High (PDH) and Previous Day Low (PDL) shifted by 1 to eliminate lookahead bias.
+    - **1-Hour Timeframe (First 60 mins)**: Captures the closing price of the 4th 15-minute candle at **10:15 AM IST** ($\text{First\_1H\_Close}$).
+    - **15-Minute Timeframe**: Computes institutional Daily Anchored VWAP utilizing the Typical Price formula:
+      $$\text{Typical Price} = \frac{\text{High} + \text{Low} + \text{Close}}{3}, \quad \text{VWAP} = \frac{\sum (\text{Typical Price} \times \text{Volume})}{\sum \text{Volume}}$$
+    - **Signal Confluence Rules**:
+      - 🟢 **Bullish Breakout**: $\text{First\_1H\_Close} > \text{PDH}$ **AND** $\text{Current 15m Close} > \text{VWAP}$
+      - 🔴 **Bearish Breakdown**: $\text{First\_1H\_Close} < \text{PDL}$ **AND** $\text{Current 15m Close} < \text{VWAP}$
+
+    ---
+
+    #### 12. Initial Hour (1H) Breakout & Break-in Modes (Options A, B & C)
+    - **Option A (1H Close vs Prev 1H Close)**:
+      - 🟢 **Breakout**: Current Day 1H Close ($10:15$) $>$ Previous Day 1H Close ($10:15$)
+      - 🔴 **Breakdown**: Current Day 1H Close $<$ Previous Day 1H Close
+      - ⚪ **Break-in**: Current Day 1H Close is contained inside Previous Day's 1H range
+    - **Option B (Live Market Price vs 1H Close)**:
+      - 🟢 **Breakout**: Live Price $>$ Current Day 1H Close
+      - 🔴 **Breakdown**: Live Price $<$ Current Day 1H Close
+      - 🔄 **Break-in**: Price broke out earlier today, but failed and re-entered below the 1H close level
+    - **Option C (Initial Balance 1H High / Low Range)**:
+      - 🟢 **Range Breakout**: Live Price $>$ Today 1H High
+      - 🔴 **Range Breakdown**: Live Price $<$ Today 1H Low
+      - 🔄 **Range Break-in**: Price broke outside the 1H Range earlier but failed and re-entered the 1H range (Classic IB Failed Breakout Reversal)
     """)
+
+    with st.expander("📜 View TradingView Pine Script (v5) Implementation"):
+        st.code(PINE_SCRIPT_V5_CODE, language="pinescript")
 
 # Auto-refresh handling
 if auto_refresh != "Off":

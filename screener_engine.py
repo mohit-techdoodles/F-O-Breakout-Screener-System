@@ -19,6 +19,7 @@ from fo_stocks import get_yf_symbol
 from volume_profile import calculate_volume_profile, get_profile_histogram
 from bollinger_screener import calculate_bollinger_bands
 from quantitative_filters import get_quant_metrics_for_stock
+from mtf_breakout import calculate_mtf_breakout
 
 
 def fetch_universe_data(
@@ -210,6 +211,9 @@ def fetch_universe_data(
         # ----------------- Quantitative Filters (RVOL & BBW Contraction) -----------------
         quant_info = get_quant_metrics_for_stock(sub_1y, curr_day_vol=day_vol)
 
+        # ----------------- MTF Breakout Algorithm (PDH/PDL + 1H Close + 15m VWAP) -----------------
+        mtf_info = calculate_mtf_breakout(sub_intra, pdh_fallback=prev_h, pdl_fallback=prev_l)
+
         # ----------------- Tomorrow's CPR & Camarilla (Next Session Projection) -----------------
         next_pivot = (day_high + day_low + ltp) / 3.0
         next_bc = (day_high + day_low) / 2.0
@@ -295,6 +299,43 @@ def fetch_universe_data(
             "W_VAH": quant_info["w_vah"],
             "W_VAL": quant_info["w_val"],
             "W_POC": quant_info["w_poc"],
+            # MTF Breakout Algorithm (PDH/PDL + 1H Close + 15m VWAP)
+            "PDH": mtf_info["pdh"],
+            "PDL": mtf_info["pdl"],
+            "First_1H_Close": mtf_info["first_1h_close"],
+            "VWAP": mtf_info["vwap"],
+            "Dist_VWAP%": mtf_info["dist_vwap_pct"],
+            "MTF_1H_Status": mtf_info["mtf_1h_status"],
+            "MTF_VWAP_Status": mtf_info["mtf_vwap_status"],
+            "MTF_Bullish": mtf_info["mtf_bullish"],
+            "MTF_Bearish": mtf_info["mtf_bearish"],
+            "MTF_Signal": mtf_info["mtf_signal"],
+            # Initial Hour (1H) Breakout & Break-in Tracking
+            "Prev_1H_Close": mtf_info["prev_1h_close"],
+            "Curr_1H_Close": mtf_info["curr_1h_close"],
+            "Prev_1H_High": mtf_info["prev_1h_high"],
+            "Prev_1H_Low": mtf_info["prev_1h_low"],
+            "Curr_1H_High": mtf_info["curr_1h_high"],
+            "Curr_1H_Low": mtf_info["curr_1h_low"],
+            "H1_Breakout_Type": mtf_info["h1_breakout_type"],
+            "Is_1H_Breakout_Bull": mtf_info["is_1h_breakout_bull"],
+            "Is_1H_Breakout_Bear": mtf_info["is_1h_breakout_bear"],
+            "Is_1H_Break_In": mtf_info["is_1h_break_in"],
+            "LTP_vs_Curr_1H": mtf_info["ltp_vs_curr_1h"],
+            "LTP_vs_Prev_1H": mtf_info["ltp_vs_prev_1h"],
+            # Options A, B, and C Initial Hour Status
+            "Opt_A_Status": mtf_info.get("opt_a_status", "N/A"),
+            "Opt_A_Bull": mtf_info.get("opt_a_bull", False),
+            "Opt_A_Bear": mtf_info.get("opt_a_bear", False),
+            "Opt_A_Breakin": mtf_info.get("opt_a_breakin", False),
+            "Opt_B_Status": mtf_info.get("opt_b_status", "N/A"),
+            "Opt_B_Bull": mtf_info.get("opt_b_bull", False),
+            "Opt_B_Bear": mtf_info.get("opt_b_bear", False),
+            "Opt_B_Breakin": mtf_info.get("opt_b_breakin", False),
+            "Opt_C_Status": mtf_info.get("opt_c_status", "N/A"),
+            "Opt_C_Bull": mtf_info.get("opt_c_bull", False),
+            "Opt_C_Bear": mtf_info.get("opt_c_bear", False),
+            "Opt_C_Breakin": mtf_info.get("opt_c_breakin", False),
             # Tomorrow's Projections
             "Next_CPR_Top": round(next_cpr_top, 2),
             "Next_CPR_Pivot": round(next_pivot, 2),
@@ -340,6 +381,8 @@ def apply_screener_filters(
     base_meta: Dict[str, any],
     high_proximity_pct: float = 0.95,
     low_proximity_pct: float = 1.05,
+    ignore_52w: bool = False,
+    h1_close_filter: str = "All",
     enable_cpr_filter: bool = True,
     only_narrow_cpr: bool = False,
     narrow_cpr_max_pct: float = 0.35,
@@ -350,6 +393,8 @@ def apply_screener_filters(
     enable_bbw_squeeze: bool = False,
     enable_weekly_filter: bool = False,
     enable_nr7_filter: bool = False,
+    enable_mtf_filter: bool = False,
+    mtf_mode: str = "Any / Both",
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
@@ -363,10 +408,14 @@ def apply_screener_filters(
 
     # 1. Core Value Area & 52-Week Breakout Conditions
     cond_bull_vah = df["LTP"] > df["PD_VAH"]
-    cond_bull_52w = df["LTP"] >= (df["52W_High"] * high_proximity_pct)
-
     cond_bear_val = df["LTP"] < df["PD_VAL"]
-    cond_bear_52w = df["LTP"] <= (df["52W_Low"] * low_proximity_pct)
+
+    if ignore_52w:
+        cond_bull_52w = pd.Series(True, index=df.index)
+        cond_bear_52w = pd.Series(True, index=df.index)
+    else:
+        cond_bull_52w = df["LTP"] >= (df["52W_High"] * high_proximity_pct)
+        cond_bear_52w = df["LTP"] <= (df["52W_Low"] * low_proximity_pct)
 
     # 2. CPR Filter (Money Zone Criteria)
     if enable_cpr_filter:
@@ -433,16 +482,65 @@ def apply_screener_filters(
     else:
         cond_nr7 = pd.Series(True, index=df.index)
 
+    # 10. Multi-Timeframe (MTF) Breakout Strategy (PDH/PDL + 1H Close + 15m VWAP)
+    if enable_mtf_filter:
+        if mtf_mode == "Bullish (1H > PDH & Above VWAP)":
+            cond_mtf_bull = df["MTF_Bullish"]
+            cond_mtf_bear = pd.Series(False, index=df.index)
+        elif mtf_mode == "Bearish (1H < PDL & Below VWAP)":
+            cond_mtf_bull = pd.Series(False, index=df.index)
+            cond_mtf_bear = df["MTF_Bearish"]
+        else:  # "Any / Both"
+            cond_mtf_bull = df["MTF_Bullish"]
+            cond_mtf_bear = df["MTF_Bearish"]
+    else:
+        cond_mtf_bull = pd.Series(True, index=df.index)
+        cond_mtf_bear = pd.Series(True, index=df.index)
+
+    # 11. Initial Hour (1H) Filters: Option A, Option B, and Option C
+    if h1_close_filter in ["Option A: Breakout > Prev 1H (Bullish)", "Breakout > Prev 1H Close"]:
+        cond_h1_bull = df["Opt_A_Bull"]
+        cond_h1_bear = pd.Series(False, index=df.index)
+    elif h1_close_filter in ["Option A: Breakdown < Prev 1H (Bearish)", "Breakdown < Prev 1H Close"]:
+        cond_h1_bull = pd.Series(False, index=df.index)
+        cond_h1_bear = df["Opt_A_Bear"]
+    elif h1_close_filter in ["Option A: Break-in (Inside Prev 1H)", "Break-in / Equal"]:
+        cond_h1_bull = df["Opt_A_Breakin"]
+        cond_h1_bear = df["Opt_A_Breakin"]
+
+    elif h1_close_filter in ["Option B: Price > 1H Close (Bullish)", "Price > Curr 1H Close"]:
+        cond_h1_bull = df["Opt_B_Bull"]
+        cond_h1_bear = pd.Series(False, index=df.index)
+    elif h1_close_filter in ["Option B: Price < 1H Close (Bearish)", "Price < Curr 1H Close"]:
+        cond_h1_bull = pd.Series(False, index=df.index)
+        cond_h1_bear = df["Opt_B_Bear"]
+    elif h1_close_filter == "Option B: Break-in (Failed 1H Close Breakout)":
+        cond_h1_bull = df["Opt_B_Breakin"]
+        cond_h1_bear = df["Opt_B_Breakin"]
+
+    elif h1_close_filter == "Option C: Range Breakout > 1H High (Bullish)":
+        cond_h1_bull = df["Opt_C_Bull"]
+        cond_h1_bear = pd.Series(False, index=df.index)
+    elif h1_close_filter == "Option C: Range Breakdown < 1H Low (Bearish)":
+        cond_h1_bull = pd.Series(False, index=df.index)
+        cond_h1_bear = df["Opt_C_Bear"]
+    elif h1_close_filter == "Option C: Range Break-in (Failed Breakout / Re-entered Range)":
+        cond_h1_bull = df["Opt_C_Breakin"]
+        cond_h1_bear = df["Opt_C_Breakin"]
+    else:
+        cond_h1_bull = pd.Series(True, index=df.index)
+        cond_h1_bear = pd.Series(True, index=df.index)
+
     # Final Combined Triggers
     df["Bullish_Breakout"] = (
         cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & 
         cond_bull_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract & 
-        cond_bull_weekly & cond_nr7
+        cond_bull_weekly & cond_nr7 & cond_mtf_bull & cond_h1_bull
     )
     df["Bearish_Breakdown"] = (
         cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & 
         cond_bear_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract & 
-        cond_bear_weekly & cond_nr7
+        cond_bear_weekly & cond_nr7 & cond_mtf_bear & cond_h1_bear
     )
 
     # Classify Signal Tag
@@ -480,6 +578,13 @@ def apply_screener_filters(
     weekly_bull_count = int((df["W_CPR_Bias"] == "Bullish (Higher Value)").sum())
     weekly_bear_count = int((df["W_CPR_Bias"] == "Bearish (Lower Value)").sum())
     weekly_inside_count = int((df["W_CPR_Bias"] == "Breakout (Inside Value)").sum())
+    mtf_bull_count = int(df["MTF_Bullish"].sum()) if "MTF_Bullish" in df.columns else 0
+    mtf_bear_count = int(df["MTF_Bearish"].sum()) if "MTF_Bearish" in df.columns else 0
+    mtf_1h_breakout_count = int((df["MTF_1H_Status"] == "🟢 Breakout > PDH").sum()) if "MTF_1H_Status" in df.columns else 0
+    mtf_1h_breakdown_count = int((df["MTF_1H_Status"] == "🔴 Breakdown < PDL").sum()) if "MTF_1H_Status" in df.columns else 0
+    h1_breakout_bull_count = int(df["Is_1H_Breakout_Bull"].sum()) if "Is_1H_Breakout_Bull" in df.columns else 0
+    h1_breakout_bear_count = int(df["Is_1H_Breakout_Bear"].sum()) if "Is_1H_Breakout_Bear" in df.columns else 0
+    h1_break_in_count = int(df["Is_1H_Break_In"].sum()) if "Is_1H_Break_In" in df.columns else 0
 
     meta = {
         "ref_date": base_meta.get("ref_date", "N/A"),
@@ -496,6 +601,15 @@ def apply_screener_filters(
         "weekly_bull_count": weekly_bull_count,
         "weekly_bear_count": weekly_bear_count,
         "weekly_inside_count": weekly_inside_count,
+        "mtf_bull_count": mtf_bull_count,
+        "mtf_bear_count": mtf_bear_count,
+        "mtf_1h_breakout_count": mtf_1h_breakout_count,
+        "mtf_1h_breakdown_count": mtf_1h_breakdown_count,
+        "h1_breakout_bull_count": h1_breakout_bull_count,
+        "h1_breakout_bear_count": h1_breakout_bear_count,
+        "h1_break_in_count": h1_break_in_count,
+        "ignore_52w": ignore_52w,
+        "h1_close_filter": h1_close_filter,
         "only_narrow_cpr": only_narrow_cpr,
         "cpr_filter_active": enable_cpr_filter,
         "camarilla_filter_mode": camarilla_filter,
@@ -504,7 +618,9 @@ def apply_screener_filters(
         "rvol_threshold": rvol_threshold,
         "enable_bbw_squeeze": enable_bbw_squeeze,
         "enable_weekly_filter": enable_weekly_filter,
-        "enable_nr7_filter": enable_nr7_filter
+        "enable_nr7_filter": enable_nr7_filter,
+        "enable_mtf_filter": enable_mtf_filter,
+        "mtf_mode": mtf_mode
     }
 
     return all_df, bullish_df, bearish_df, meta
@@ -515,6 +631,8 @@ def fetch_and_screen(
     timeframe: str = "5m", 
     high_proximity_pct: float = 0.95,
     low_proximity_pct: float = 1.05,
+    ignore_52w: bool = False,
+    h1_close_filter: str = "All",
     enable_cpr_filter: bool = True,
     only_narrow_cpr: bool = False,
     narrow_cpr_max_pct: float = 0.35,
@@ -525,6 +643,8 @@ def fetch_and_screen(
     enable_bbw_squeeze: bool = False,
     enable_weekly_filter: bool = False,
     enable_nr7_filter: bool = False,
+    enable_mtf_filter: bool = False,
+    mtf_mode: str = "Any / Both",
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
@@ -539,6 +659,8 @@ def fetch_and_screen(
         base_meta,
         high_proximity_pct=high_proximity_pct,
         low_proximity_pct=low_proximity_pct,
+        ignore_52w=ignore_52w,
+        h1_close_filter=h1_close_filter,
         enable_cpr_filter=enable_cpr_filter,
         only_narrow_cpr=only_narrow_cpr,
         narrow_cpr_max_pct=narrow_cpr_max_pct,
@@ -549,6 +671,8 @@ def fetch_and_screen(
         enable_bbw_squeeze=enable_bbw_squeeze,
         enable_weekly_filter=enable_weekly_filter,
         enable_nr7_filter=enable_nr7_filter,
+        enable_mtf_filter=enable_mtf_filter,
+        mtf_mode=mtf_mode,
         **kwargs
     )
 
@@ -642,6 +766,9 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
     except Exception:
         bb = {}
 
+    # MTF Breakout Algorithm (PDH, PDL, 1H Close, 15m VWAP)
+    mtf = calculate_mtf_breakout(df, pdh_fallback=prev_h, pdl_fallback=prev_l)
+
     return {
         "prev_df": prev_df,
         "curr_df": curr_df,
@@ -652,6 +779,7 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
         "next_cam": next_cam,
         "bb": bb,
         "quant": quant,
+        "mtf": mtf,
         "bins": bins,
         "vols": vols,
         "prev_date": str(prev_date),
