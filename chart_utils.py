@@ -20,7 +20,8 @@ def create_breakout_chart(
     cpr: Optional[dict] = None,
     cam: Optional[dict] = None,
     bb: Optional[dict] = None,
-    mtf: Optional[dict] = None
+    mtf: Optional[dict] = None,
+    fib: Optional[dict] = None
 ) -> go.Figure:
     """
     Renders an institutional-grade Candlestick chart with:
@@ -289,6 +290,48 @@ def create_breakout_chart(
                 annotation_text=f"1H Close (₹{h1_close})",
                 annotation_position="top right",
                 annotation_font=dict(color="#D500F9", size=10),
+                row=1, col=1
+            )
+
+    # Fibonacci Retracement & Automated Targets (Section 4)
+    if fib:
+        fib_618 = fib.get("fib_0618")
+        target_1 = fib.get("target_1")
+        target_2 = fib.get("target_2")
+        s_high = fib.get("swing_high")
+        s_low = fib.get("swing_low")
+
+        if fib_618 and not np.isnan(fib_618):
+            fig.add_hline(
+                y=fib_618,
+                line_dash="dash",
+                line_color="#FFD54F",
+                line_width=1.8,
+                annotation_text=f"Golden Pocket 0.618 (₹{fib_618})",
+                annotation_position="bottom right",
+                annotation_font=dict(color="#FFD54F", size=10),
+                row=1, col=1
+            )
+        if target_1 and not np.isnan(target_1):
+            fig.add_hline(
+                y=target_1,
+                line_dash="dashdot",
+                line_color="#00E5FF",
+                line_width=1.5,
+                annotation_text=f"Fib Target 1 [-0.272] (₹{target_1})",
+                annotation_position="top left",
+                annotation_font=dict(color="#00E5FF", size=10),
+                row=1, col=1
+            )
+        if target_2 and not np.isnan(target_2):
+            fig.add_hline(
+                y=target_2,
+                line_dash="dashdot",
+                line_color="#00E676",
+                line_width=1.5,
+                annotation_text=f"Fib Target 2 [-0.618] (₹{target_2})",
+                annotation_position="top left",
+                annotation_font=dict(color="#00E676", size=10),
                 row=1, col=1
             )
 

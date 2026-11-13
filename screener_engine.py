@@ -20,6 +20,7 @@ from volume_profile import calculate_volume_profile, get_profile_histogram
 from bollinger_screener import calculate_bollinger_bands
 from quantitative_filters import get_quant_metrics_for_stock
 from mtf_breakout import calculate_mtf_breakout
+from fibonacci_engine import compute_dual_timeframe_fibonacci, calculate_fibonacci_levels
 
 
 def fetch_universe_data(
@@ -222,6 +223,12 @@ def fetch_universe_data(
         # ----------------- MTF Breakout Algorithm (PDH/PDL + 1H Close + 15m VWAP) -----------------
         mtf_info = calculate_mtf_breakout(sub_intra, pdh_fallback=prev_h, pdl_fallback=prev_l)
 
+        # ----------------- Fibonacci Retracement Engine (Section 4) -----------------
+        is_breakin = mtf_info.get("is_1h_break_in", False)
+        fib_data = compute_dual_timeframe_fibonacci(sub_intra, ltp=ltp, is_1h_break_in=is_breakin)
+        fib_macro = fib_data["macro"]
+        fib_micro = fib_data["micro"]
+
         # ----------------- Tomorrow's CPR & Camarilla (Next Session Projection) -----------------
         next_pivot = (day_high + day_low + ltp) / 3.0
         next_bc = (day_high + day_low) / 2.0
@@ -344,6 +351,34 @@ def fetch_universe_data(
             "Opt_C_Bull": mtf_info.get("opt_c_bull", False),
             "Opt_C_Bear": mtf_info.get("opt_c_bear", False),
             "Opt_C_Breakin": mtf_info.get("opt_c_breakin", False),
+            # Fibonacci Retracement & Automated Targets (Section 4)
+            # Macro Context (1-Hour)
+            "Fib_Swing_High": fib_macro["swing_high"],
+            "Fib_Swing_Low": fib_macro["swing_low"],
+            "Fib_Swing_Range": fib_macro["swing_range"],
+            "Fib_Swing_Type": fib_macro["swing_type"],
+            "Fib_0236": fib_macro["fib_0236"],
+            "Fib_0382": fib_macro["fib_0382"],
+            "Fib_0500": fib_macro["fib_0500"],
+            "Fib_0618": fib_macro["fib_0618"],
+            "Fib_0786": fib_macro["fib_0786"],
+            "Fib_Target_1": fib_macro["target_1"],
+            "Fib_Target_2": fib_macro["target_2"],
+            "Fib_Retrace%": fib_macro["retrace_pct"],
+            "Fib_Dist_0618%": fib_macro["dist_0618_pct"],
+            "Is_Golden_Pocket": fib_macro["is_golden_pocket"],
+            "Is_Golden_Pocket_Confluence": fib_macro["is_golden_pocket_confluence"],
+            "Fib_Status": fib_macro["fib_status"],
+            # Micro Context (15-Minute)
+            "Micro_Fib_Swing_High": fib_micro["swing_high"],
+            "Micro_Fib_Swing_Low": fib_micro["swing_low"],
+            "Micro_Fib_0618": fib_micro["fib_0618"],
+            "Micro_Fib_Target_1": fib_micro["target_1"],
+            "Micro_Fib_Target_2": fib_micro["target_2"],
+            "Micro_Fib_Retrace%": fib_micro["retrace_pct"],
+            "Micro_Is_Golden_Pocket": fib_micro["is_golden_pocket"],
+            "Micro_Is_GP_Confluence": fib_micro["is_golden_pocket_confluence"],
+            "Micro_Fib_Status": fib_micro["fib_status"],
             # Tomorrow's Projections
             "Next_CPR_Top": round(next_cpr_top, 2),
             "Next_CPR_Pivot": round(next_pivot, 2),
@@ -403,6 +438,8 @@ def apply_screener_filters(
     enable_nr7_filter: bool = False,
     enable_mtf_filter: bool = False,
     mtf_mode: str = "Any / Both",
+    fib_filter: str = "All / Off",
+    fib_timeframe: str = "1-Hour (Macro)",
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
@@ -539,16 +576,35 @@ def apply_screener_filters(
         cond_h1_bull = pd.Series(True, index=df.index)
         cond_h1_bear = pd.Series(True, index=df.index)
 
+    # 12. Fibonacci Retracement & Golden Pocket Confluence (Section 4)
+    is_macro = "1-Hour" in fib_timeframe or "1h" in str(fib_timeframe).lower()
+    gp_confluence_col = "Is_Golden_Pocket_Confluence" if is_macro else "Micro_Is_GP_Confluence"
+    gp_at_col = "Is_Golden_Pocket" if is_macro else "Micro_Is_Golden_Pocket"
+    retrace_col = "Fib_Retrace%" if is_macro else "Micro_Fib_Retrace%"
+    swing_high_col = "Fib_Swing_High" if is_macro else "Micro_Fib_Swing_High"
+    swing_low_col = "Fib_Swing_Low" if is_macro else "Micro_Fib_Swing_Low"
+
+    if fib_filter in ["Golden Pocket (0.618) Confluence (High Probability)", "⭐ Golden Pocket (0.618) Confluence (High Probability)"]:
+        cond_fib = df[gp_confluence_col] if gp_confluence_col in df.columns else pd.Series(True, index=df.index)
+    elif fib_filter in ["At Golden Pocket (0.618 ±0.5%)", "🟡 At Golden Pocket (0.618 ±0.5%)"]:
+        cond_fib = df[gp_at_col] if gp_at_col in df.columns else pd.Series(True, index=df.index)
+    elif fib_filter in ["Beyond Swing Extreme (Targets 1 & 2 In Play)", "🚀 Beyond Swing Extreme (Targets 1 & 2 In Play)"]:
+        cond_fib = (df["LTP"] > df[swing_high_col]) | (df["LTP"] < df[swing_low_col]) if swing_high_col in df.columns else pd.Series(True, index=df.index)
+    elif fib_filter in ["Pullback in Golden Zone (0.50 - 0.618)", "⚡ Pullback in Golden Zone (0.50 - 0.618)"]:
+        cond_fib = (df[retrace_col] >= 50.0) & (df[retrace_col] <= 62.0) if retrace_col in df.columns else pd.Series(True, index=df.index)
+    else:
+        cond_fib = pd.Series(True, index=df.index)
+
     # Final Combined Triggers
     df["Bullish_Breakout"] = (
         cond_bull_vah & cond_bull_52w & cond_bull_cpr & cond_bull_cam & 
         cond_bull_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract & 
-        cond_bull_weekly & cond_nr7 & cond_mtf_bull & cond_h1_bull
+        cond_bull_weekly & cond_nr7 & cond_mtf_bull & cond_h1_bull & cond_fib
     )
     df["Bearish_Breakdown"] = (
         cond_bear_val & cond_bear_52w & cond_bear_cpr & cond_bear_cam & 
         cond_bear_bb & cond_narrow_cpr & cond_rvol & cond_bbw_contract & 
-        cond_bear_weekly & cond_nr7 & cond_mtf_bear & cond_h1_bear
+        cond_bear_weekly & cond_nr7 & cond_mtf_bear & cond_h1_bear & cond_fib
     )
 
     # Classify Signal Tag
@@ -628,7 +684,11 @@ def apply_screener_filters(
         "enable_weekly_filter": enable_weekly_filter,
         "enable_nr7_filter": enable_nr7_filter,
         "enable_mtf_filter": enable_mtf_filter,
-        "mtf_mode": mtf_mode
+        "mtf_mode": mtf_mode,
+        "fib_gp_confluence_count": int(df["Is_Golden_Pocket_Confluence"].sum()) if "Is_Golden_Pocket_Confluence" in df.columns else 0,
+        "fib_at_gp_count": int(df["Is_Golden_Pocket"].sum()) if "Is_Golden_Pocket" in df.columns else 0,
+        "fib_filter": fib_filter,
+        "fib_timeframe": fib_timeframe
     }
 
     return all_df, bullish_df, bearish_df, meta
@@ -653,6 +713,8 @@ def fetch_and_screen(
     enable_nr7_filter: bool = False,
     enable_mtf_filter: bool = False,
     mtf_mode: str = "Any / Both",
+    fib_filter: str = "All / Off",
+    fib_timeframe: str = "1-Hour (Macro)",
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, any]]:
     """
@@ -777,6 +839,9 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
     # MTF Breakout Algorithm (PDH, PDL, 1H Close, 15m VWAP)
     mtf = calculate_mtf_breakout(df, pdh_fallback=prev_h, pdl_fallback=prev_l)
 
+    # Fibonacci Retracement & Automated Targets (Section 4)
+    fib = calculate_fibonacci_levels(df, ltp=curr_c, is_1h_break_in=mtf.get("is_1h_break_in", False))
+
     return {
         "prev_df": prev_df,
         "curr_df": curr_df,
@@ -788,6 +853,7 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
         "bb": bb,
         "quant": quant,
         "mtf": mtf,
+        "fib": fib,
         "bins": bins,
         "vols": vols,
         "prev_date": str(prev_date),

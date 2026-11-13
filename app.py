@@ -259,6 +259,29 @@ h1_filter = st.sidebar.selectbox(
     help="Select Option A (1H Close vs Prev 1H Close), Option B (Live Price vs 1H Close), or Option C (Initial Balance 1H Range Breakout or Break-in)."
 )
 
+# Fibonacci Retracement Engine (Section 4)
+st.sidebar.markdown("---")
+st.sidebar.subheader("📐 Fibonacci Retracement Engine")
+fib_tf = st.sidebar.selectbox(
+    "Fibonacci Timeframe Context",
+    ["1-Hour (Macro)", "15-Minute (Micro)"],
+    index=0,
+    help="Section 4.1: 1-Hour Swings (Macro Context, 20-30 hourly candles) for major support/resistance, or 15-Minute Swings (Micro Context, 2.5 hours) for intraday pullback execution."
+)
+
+fib_filter = st.sidebar.selectbox(
+    "Fibonacci Confluence Filter",
+    [
+        "All / Off",
+        "⭐ Golden Pocket (0.618) Confluence (High Probability)",
+        "🟡 At Golden Pocket (0.618 ±0.5%)",
+        "🚀 Beyond Swing Extreme (Targets 1 & 2 In Play)",
+        "⚡ Pullback in Golden Zone (0.50 - 0.618)"
+    ],
+    index=0,
+    help="Section 4.2: High Probability setups when a 1-Hour Break-in (Option C) occurs at Fib 0.618 level, or filter by Golden Pocket testing."
+)
+
 # Auto-refresh
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Live Refresh")
@@ -334,7 +357,9 @@ all_df, bull_df, bear_df, meta = apply_screener_filters(
     enable_weekly_filter=enable_weekly,
     enable_nr7_filter=enable_nr7,
     enable_mtf_filter=enable_mtf,
-    mtf_mode=mtf_mode
+    mtf_mode=mtf_mode,
+    fib_filter=fib_filter,
+    fib_timeframe=fib_tf
 )
 
 # Extract squeezing & MTF stocks
@@ -400,8 +425,8 @@ with m6:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Secondary Metric Cards (Quantitative & MTF Overview)
-q1, q2, q3, q4, q5 = st.columns(5)
+# Secondary Metric Cards (Quantitative, MTF & Fibonacci Overview)
+q1, q2, q3, q4, q5, q6 = st.columns(6)
 with q1:
     st.markdown(f"""
     <div class="metric-card" style="border-left: 3px solid #00E676;">
@@ -442,13 +467,22 @@ with q5:
     </div>
     """, unsafe_allow_html=True)
 
+with q6:
+    st.markdown(f"""
+    <div class="metric-card" style="border-left: 3px solid #FFD54F;">
+        <div class="metric-lbl">⭐ Golden Pocket (0.618)</div>
+        <div class="metric-val" style="color: #FFD54F; font-size: 20px;">{meta.get('fib_gp_confluence_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Main Navigation Tabs
-tab1, tab2, tab_mtf, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab_mtf, tab_fib, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     f"🚀 Bullish Breakouts ({len(bull_df)})", 
     f"🔻 Bearish Breakdowns ({len(bear_df)})", 
     f"🎯 MTF Breakouts ({mtf_total_count})",
+    f"📐 Fibonacci & Targets ({meta.get('fib_gp_confluence_count', 0)})",
     f"🌅 Tomorrow's CPR Watchlist ({meta.get('next_narrow_cpr_count', 0)})",
     f"🌀 Squeeze Radar ({len(squeeze_df)})",
     "📈 Interactive Chart & Visualizer", 
@@ -488,8 +522,15 @@ with tab1:
     else:
         st.success(f"🎯 Found **{len(bull_df)}** Bullish Breakout candidate(s)!")
         
+        f_0618 = "Fib_0618" if "1-Hour" in fib_tf else "Micro_Fib_0618"
+        f_t1 = "Fib_Target_1" if "1-Hour" in fib_tf else "Micro_Fib_Target_1"
+        f_t2 = "Fib_Target_2" if "1-Hour" in fib_tf else "Micro_Fib_Target_2"
+        f_stat = "Fib_Status" if "1-Hour" in fib_tf else "Micro_Fib_Status"
+
         display_bull = bull_df[[
-            "Symbol", "LTP", "Chg%", "MTF_Signal", "First_1H_Close", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAH", "Dist_W_VAH%", 
+            "Symbol", "LTP", "Chg%", "MTF_Signal", "First_1H_Close", 
+            f_t1, f_t2, f_0618, f_stat,
+            "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAH", "Dist_W_VAH%", 
             "PD_VAH", "Dist_VAH%", "52W_High", "Dist_52W_High%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Top", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
@@ -499,6 +540,10 @@ with tab1:
             "Chg%": "Day Chg %",
             "MTF_Signal": "MTF Signal",
             "First_1H_Close": "1H Close (10:15) ₹",
+            f_t1: "Target 1 [-0.272] (₹)",
+            f_t2: "Target 2 [-0.618] (₹)",
+            f_0618: "0.618 Golden Pocket (₹)",
+            f_stat: "Fibonacci Status",
             "RVOL": "RVOL (20D)",
             "BBW_Contract_Status": "BBW Contraction",
             "NR7_Status": "NR7 Status",
@@ -523,6 +568,9 @@ with tab1:
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
             "1H Close (10:15) ₹": "₹{:.2f}",
+            "Target 1 [-0.272] (₹)": "₹{:.2f}",
+            "Target 2 [-0.618] (₹)": "₹{:.2f}",
+            "0.618 Golden Pocket (₹)": "₹{:.2f}",
             "RVOL (20D)": "{:.2f}x",
             "Weekly VAH (₹)": "₹{:.2f}",
             "% vs W_VAH": "{:+.2f}%",
@@ -582,8 +630,15 @@ with tab2:
     else:
         st.error(f"🔻 Found **{len(bear_df)}** Bearish Breakdown candidate(s)!")
         
+        f_0618 = "Fib_0618" if "1-Hour" in fib_tf else "Micro_Fib_0618"
+        f_t1 = "Fib_Target_1" if "1-Hour" in fib_tf else "Micro_Fib_Target_1"
+        f_t2 = "Fib_Target_2" if "1-Hour" in fib_tf else "Micro_Fib_Target_2"
+        f_stat = "Fib_Status" if "1-Hour" in fib_tf else "Micro_Fib_Status"
+
         display_bear = bear_df[[
-            "Symbol", "LTP", "Chg%", "MTF_Signal", "First_1H_Close", "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAL", "Dist_W_VAL%",
+            "Symbol", "LTP", "Chg%", "MTF_Signal", "First_1H_Close", 
+            f_t1, f_t2, f_0618, f_stat,
+            "RVOL", "BBW_Contract_Status", "NR7_Status", "W_CPR_Bias", "W_VAL", "Dist_W_VAL%",
             "PD_VAL", "Dist_VAL%", "52W_Low", "Dist_52W_Low%", 
             "CPR_Status", "CPR_Type", "PD_CPR_Width%", "PD_CPR_Bottom", "Cam_Status", "BB_Status", "BB_Bandwidth%", "PD_POC"
         ]].copy()
@@ -593,6 +648,10 @@ with tab2:
             "Chg%": "Day Chg %",
             "MTF_Signal": "MTF Signal",
             "First_1H_Close": "1H Close (10:15) ₹",
+            f_t1: "Target 1 [-0.272] (₹)",
+            f_t2: "Target 2 [-0.618] (₹)",
+            f_0618: "0.618 Golden Pocket (₹)",
+            f_stat: "Fibonacci Status",
             "RVOL": "RVOL (20D)",
             "BBW_Contract_Status": "BBW Contraction",
             "NR7_Status": "NR7 Status",
@@ -617,6 +676,9 @@ with tab2:
             "LTP (₹)": "₹{:.2f}",
             "Day Chg %": "{:+.2f}%",
             "1H Close (10:15) ₹": "₹{:.2f}",
+            "Target 1 [-0.272] (₹)": "₹{:.2f}",
+            "Target 2 [-0.618] (₹)": "₹{:.2f}",
+            "0.618 Golden Pocket (₹)": "₹{:.2f}",
             "RVOL (20D)": "{:.2f}x",
             "Weekly VAL (₹)": "₹{:.2f}",
             "% vs W_VAL": "{:+.2f}%",
@@ -759,6 +821,120 @@ with tab_mtf:
         Copy and paste this script directly into **TradingView Pine Editor (v5)** to display the MTF Breakout indicators and VWAP overlays on your 15-minute charts:
         """)
         st.code(PINE_SCRIPT_V5_CODE, language="pinescript")
+
+
+# ----------------- TAB FIB: FIBONACCI RETRACEMENT & AUTOMATED TARGETS -----------------
+with tab_fib:
+    st.subheader("📐 Fibonacci Retracement Engine & Automated Targets")
+    st.caption(f"Context: **{fib_tf}** &bull; Fractal Swings (5-Bar) &bull; Golden Pocket (0.618) Confluence &bull; Inverse Targets (-0.272 and -0.618)")
+
+    st.markdown(r"""
+    > **Fibonacci Retracement Architecture (Section 4):**
+    > 1. **Timeframe Context:** Uses 5-bar fractal pivot points. **1-Hour Swings** (Macro Context, 20-30 hourly candles) capture major structural support/resistance. **15-Minute Swings** (Micro Context, 2.5 hours) capture intraday pullbacks.
+    > 2. **The Golden Pocket (0.618):** Systemic flag for **High Probability** setups when a 1-Hour Break-in (Option C) occurs at the `Fib_0.618` level of the swing.
+    > 3. **Automated Targets:** Inverse extensions **Target 1 (-0.272)** and **Target 2 (-0.618)** calculated automatically from active swing points.
+    > 4. **52-Week Flexibility:** Works with 52-Week High/Low proximity AND irrespective of that (`🔓 Irrespective of 52-Week High/Low`).
+    """)
+
+    # Select columns based on active timeframe
+    is_macro_fib = "1-Hour" in fib_tf
+    f_sh = "Fib_Swing_High" if is_macro_fib else "Micro_Fib_Swing_High"
+    f_sl = "Fib_Swing_Low" if is_macro_fib else "Micro_Fib_Swing_Low"
+    f_0618 = "Fib_0618" if is_macro_fib else "Micro_Fib_0618"
+    f_t1 = "Fib_Target_1" if is_macro_fib else "Micro_Fib_Target_1"
+    f_t2 = "Fib_Target_2" if is_macro_fib else "Micro_Fib_Target_2"
+    f_retrace = "Fib_Retrace%" if is_macro_fib else "Micro_Fib_Retrace%"
+    f_status = "Fib_Status" if is_macro_fib else "Micro_Fib_Status"
+    f_gp_flag = "Is_Golden_Pocket_Confluence" if is_macro_fib else "Micro_Is_GP_Confluence"
+
+    # Split into High Probability Golden Pocket Confluences vs All Swings
+    gp_confluence_df = all_df[all_df[f_gp_flag]].copy() if f_gp_flag in all_df.columns else pd.DataFrame()
+
+    col_gp1, col_gp2 = st.columns([1, 1])
+    with col_gp1:
+        st.markdown(f"#### ⭐ High Probability Golden Pocket (0.618) Confluences ({len(gp_confluence_df)})")
+        if gp_confluence_df.empty:
+            st.info("ℹ️ No stocks currently have an active 1-Hour Break-in (Option C) touching the Fib 0.618 Golden Pocket.")
+        else:
+            display_gp = gp_confluence_df[[
+                "Symbol", "LTP", "Chg%", f_0618, f_t1, f_t2, f_status, "Opt_C_Status"
+            ]].copy().rename(columns={
+                "LTP": "LTP (₹)",
+                "Chg%": "Day Chg %",
+                f_0618: "Golden Pocket 0.618 ₹",
+                f_t1: "Target 1 [-0.272] ₹",
+                f_t2: "Target 2 [-0.618] ₹",
+                f_status: "Fibonacci Status",
+                "Opt_C_Status": "Option C Status"
+            })
+            st.dataframe(
+                display_gp.style.format({
+                    "LTP (₹)": "₹{:.2f}",
+                    "Day Chg %": "{:+.2f}%",
+                    "Golden Pocket 0.618 ₹": "₹{:.2f}",
+                    "Target 1 [-0.272] ₹": "₹{:.2f}",
+                    "Target 2 [-0.618] ₹": "₹{:.2f}"
+                }),
+                **get_width_kw(st.dataframe),
+                hide_index=True
+            )
+
+    with col_gp2:
+        st.markdown("#### 🎯 Automated Profit Targets & Golden Zone Rules")
+        st.markdown(f"""
+        - **Active Context:** `{fib_tf}`
+        - **52-Week Rule:** `{'🔓 Bypassed (Irrespective of 52W)' if ignore_52w else '🔒 Active (Near 52W High/Low)'}`
+        - **Golden Pocket:** 61.8% retracement of the dominant fractal swing.
+        - **Inverse Target 1 (-0.272):** First high-probability structural take-profit expansion.
+        - **Inverse Target 2 (-0.618):** Full wave extension target for runners.
+        """)
+
+    st.markdown("---")
+    st.markdown(f"#### 📋 All Stocks — Fibonacci Retracement & Automated Targets Monitor ({len(all_df)})")
+    
+    fib_monitor_cols = [
+        "Symbol", "LTP", "Chg%", f_sh, f_sl, "Fib_Swing_Type", 
+        "Fib_0500", f_0618, f_t1, f_t2, f_retrace, f_status
+    ]
+    avail_cols = [c for c in fib_monitor_cols if c in all_df.columns]
+    display_fib_all = all_df[avail_cols].copy().rename(columns={
+        "LTP": "LTP (₹)",
+        "Chg%": "Day Chg %",
+        f_sh: "Swing High (₹)",
+        f_sl: "Swing Low (₹)",
+        "Fib_Swing_Type": "Swing Direction",
+        "Fib_0500": "50% Fib (₹)",
+        f_0618: "0.618 Golden Pocket (₹)",
+        f_t1: "Target 1 [-0.272] (₹)",
+        f_t2: "Target 2 [-0.618] (₹)",
+        f_retrace: "Retrace %",
+        f_status: "Fibonacci Setup Status"
+    })
+
+    st.dataframe(
+        display_fib_all.style.format({
+            "LTP (₹)": "₹{:.2f}",
+            "Day Chg %": "{:+.2f}%",
+            "Swing High (₹)": "₹{:.2f}",
+            "Swing Low (₹)": "₹{:.2f}",
+            "50% Fib (₹)": "₹{:.2f}",
+            "0.618 Golden Pocket (₹)": "₹{:.2f}",
+            "Target 1 [-0.272] (₹)": "₹{:.2f}",
+            "Target 2 [-0.618] (₹)": "₹{:.2f}",
+            "Retrace %": "{:.1f}%"
+        }),
+        **get_width_kw(st.dataframe),
+        hide_index=True
+    )
+
+    fib_csv = all_df[avail_cols].to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Fibonacci & Targets CSV",
+        data=fib_csv,
+        file_name=f"fibonacci_targets_{meta.get('live_date', 'today')}.csv",
+        mime="text/csv",
+        key="btn_download_fib_csv"
+    )
 
 
 # ----------------- TAB 3: TOMORROW'S CPR WATCHLIST (POST-MARKET PRE-PLANNER) -----------------
@@ -944,7 +1120,8 @@ with tab5:
             cpr=chart_data.get("cpr"),
             cam=chart_data.get("cam"),
             bb=chart_data.get("bb"),
-            mtf=chart_data.get("mtf")
+            mtf=chart_data.get("mtf"),
+            fib=chart_data.get("fib")
         )
         st.plotly_chart(fig, **get_width_kw(st.plotly_chart))
         
@@ -956,6 +1133,21 @@ with tab5:
         c4.metric(f"CPR ({stock_row['CPR_Type']})", f"₹{stock_row['PD_CPR_Top']:.2f}", f"Width: {stock_row['PD_CPR_Width%']:.3f}%")
         c5.metric("Cam H4 / L4", f"₹{stock_row['PD_Cam_H4']:.2f}", f"L4: ₹{stock_row['PD_Cam_L4']:.2f}")
         c6.metric("BB Bandwidth", f"{stock_row['BB_Bandwidth%']:.2f}%", f"Min: {stock_row['BB_Min_Bandwidth%']:.2f}%")
+
+        # Fibonacci Retracement & Automated Targets Banner
+        fb = chart_data.get("fib", {})
+        if fb and not np.isnan(fb.get("fib_0618", np.nan)):
+            st.markdown(f"""
+            <div style="background: rgba(255, 213, 79, 0.08); border: 1px solid #FFD54F; border-radius: 6px; padding: 10px 14px; margin-top: 10px;">
+                <span style="font-weight: 700; color: #FFD54F;">📐 Fibonacci Retracement & Targets ({fb.get('fib_timeframe', '1-Hour')}):</span> &nbsp;
+                <b>Swing:</b> {fb.get('swing_type')} (High: ₹{fb.get('swing_high')}, Low: ₹{fb.get('swing_low')}) &nbsp;|&nbsp;
+                <b>Golden Pocket (0.618):</b> ₹{fb.get('fib_0618')} &nbsp;|&nbsp;
+                <span style="color: #00E5FF; font-weight: 700;">Target 1 [-0.272]:</span> ₹{fb.get('target_1')} &nbsp;|&nbsp;
+                <span style="color: #00E676; font-weight: 700;">Target 2 [-0.618]:</span> ₹{fb.get('target_2')} &nbsp;|&nbsp;
+                <b>Retrace:</b> {fb.get('retrace_pct')}% &nbsp;|&nbsp;
+                <b>Status:</b> {fb.get('fib_status')}
+            </div>
+            """, unsafe_allow_html=True)
 
         # MTF Indicator Banner
         m_stat = stock_row.get("MTF_Signal", "None")
@@ -1010,8 +1202,14 @@ with tab6:
     if search_query:
         filter_df = filter_df[filter_df["Symbol"].str.contains(search_query)]
 
+    f_0618 = "Fib_0618" if "1-Hour" in fib_tf else "Micro_Fib_0618"
+    f_t1 = "Fib_Target_1" if "1-Hour" in fib_tf else "Micro_Fib_Target_1"
+    f_t2 = "Fib_Target_2" if "1-Hour" in fib_tf else "Micro_Fib_Target_2"
+    f_stat = "Fib_Status" if "1-Hour" in fib_tf else "Micro_Fib_Status"
+
     display_all = filter_df[[
         "Symbol", "LTP", "Chg%", "Signal", "MTF_Signal", "MTF_1H_Status", "First_1H_Close", "VWAP",
+        f_0618, f_t1, f_t2, f_stat,
         "RVOL", "BBW_Contract_Status", "NR7_Status", 
         "W_CPR_Bias", "W_VAH", "W_VAL", "Next_CPR_Type", "Next_CPR_Width%",
         "PD_VAH", "Dist_VAH%", "PD_VAL", "Dist_VAL%", 
@@ -1025,6 +1223,9 @@ with tab6:
             "Chg%": "{:+.2f}%",
             "First_1H_Close": "₹{:.2f}",
             "VWAP": "₹{:.2f}",
+            f_0618: "₹{:.2f}",
+            f_t1: "₹{:.2f}",
+            f_t2: "₹{:.2f}",
             "RVOL": "{:.2f}x",
             "W_VAH": "₹{:.2f}",
             "W_VAL": "₹{:.2f}",
