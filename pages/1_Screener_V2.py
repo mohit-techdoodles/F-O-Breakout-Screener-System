@@ -112,7 +112,10 @@ with st.container():
         </span>
         """, unsafe_allow_html=True)
     with col_nav2:
-        st.page_link("app.py", label="🏛️ Switch to Classic Screener V1", icon="🔙", use_container_width=True)
+        try:
+            st.page_link("app.py", label="🏛️ Switch to Classic Screener V1", icon="🔙", use_container_width=True)
+        except Exception:
+            st.markdown("[🏛️ **Switch to Classic Screener V1**](/)")
 
 st.markdown("---")
 
@@ -120,7 +123,10 @@ st.markdown("---")
 st.sidebar.title("🎛️ Screener V2.0 Settings")
 
 # Navigation Link in Sidebar
-st.sidebar.page_link("app.py", label="🏛️ Go to Classic Screener V1", icon="🔙")
+try:
+    st.sidebar.page_link("app.py", label="🏛️ Go to Classic Screener V1", icon="🔙")
+except Exception:
+    st.sidebar.markdown("[🏛️ **Go to Classic Screener V1**](/)")
 st.sidebar.markdown("---")
 
 # Universe Selection
@@ -555,3 +561,4 @@ with tab5:
 
     st.subheader("TradingView Pine Script (v5) Code")
     st.code(PINE_SCRIPT_V5_CODE, language="pinescript")
+

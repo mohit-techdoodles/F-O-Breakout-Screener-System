@@ -83,7 +83,10 @@ st.sidebar.title("⚡ Screener Controls")
 
 # Switch to Screener V2.0 Navigation Link
 st.sidebar.info("✨ **Looking for Screener V2.0?**\n\nTry the new MTF & Money Zone Screener V2.0:")
-st.sidebar.page_link("pages/1_🎯_Screener_V2.py", label="🚀 Launch Screener Architecture V2.0", icon="🎯")
+try:
+    st.sidebar.page_link("pages/1_Screener_V2.py", label="🚀 Launch Screener Architecture V2.0", icon="🎯")
+except Exception:
+    st.sidebar.markdown("[🚀 **Launch Screener Architecture V2.0**](/Screener_V2)")
 st.sidebar.markdown("---")
 
 # Universe Selection

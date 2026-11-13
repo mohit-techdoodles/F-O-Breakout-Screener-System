@@ -979,3 +979,4 @@ def apply_screener_v2_filters(
     }
 
     return all_filtered, bullish_df, bearish_df, meta_stats
+
