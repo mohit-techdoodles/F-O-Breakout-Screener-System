@@ -140,6 +140,7 @@ def calculate_mtf_breakout(
             prev_1h_low = float(prev_bars["Low"].iloc[:4].min())
 
     # Current Day 1H metrics
+    first_1h_close = np.nan
     curr_1h_close = np.nan
     curr_1h_high = np.nan
     curr_1h_low = np.nan

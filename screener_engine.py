@@ -74,14 +74,17 @@ def fetch_universe_data(
         
         # Extract intraday sub-dataframe
         try:
-            if is_single_ticker:
-                sub_intra = df_intraday.dropna(how="all")
-                if isinstance(sub_intra.columns, pd.MultiIndex):
-                    sub_intra.columns = sub_intra.columns.get_level_values(0)
+            if isinstance(df_intraday.columns, pd.MultiIndex):
+                if t in df_intraday.columns.levels[0]:
+                    sub_intra = df_intraday[t].dropna(how="all")
+                elif 'Ticker' in df_intraday.columns.names:
+                    sub_intra = df_intraday.xs(t, axis=1, level='Ticker').dropna(how="all")
+                else:
+                    sub_intra = df_intraday.dropna(how="all")
+                    if isinstance(sub_intra.columns, pd.MultiIndex):
+                        sub_intra.columns = sub_intra.columns.get_level_values(-1)
             else:
-                if t not in df_intraday.columns.levels[0]:
-                    continue
-                sub_intra = df_intraday[t].dropna(how="all")
+                sub_intra = df_intraday.dropna(how="all")
         except Exception:
             continue
 
@@ -127,12 +130,17 @@ def fetch_universe_data(
         l52 = np.nan
         sub_1y = pd.DataFrame()
         try:
-            if is_single_ticker:
-                sub_1y = df_1y.dropna(how="all")
-                if isinstance(sub_1y.columns, pd.MultiIndex):
-                    sub_1y.columns = sub_1y.columns.get_level_values(0)
+            if isinstance(df_1y.columns, pd.MultiIndex):
+                if t in df_1y.columns.levels[0]:
+                    sub_1y = df_1y[t].dropna(how="all")
+                elif 'Ticker' in df_1y.columns.names:
+                    sub_1y = df_1y.xs(t, axis=1, level='Ticker').dropna(how="all")
+                else:
+                    sub_1y = df_1y.dropna(how="all")
+                    if isinstance(sub_1y.columns, pd.MultiIndex):
+                        sub_1y.columns = sub_1y.columns.get_level_values(-1)
             else:
-                sub_1y = df_1y[t].dropna(how="all") if t in df_1y.columns.levels[0] else pd.DataFrame()
+                sub_1y = df_1y.dropna(how="all")
 
             if not sub_1y.empty:
                 h52 = float(sub_1y["High"].max())
