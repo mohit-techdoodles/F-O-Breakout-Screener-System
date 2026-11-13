@@ -7,6 +7,7 @@ import datetime
 import importlib
 import inspect
 import time
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -17,6 +18,7 @@ import bollinger_screener
 import volume_profile
 import quantitative_filters
 import mtf_breakout
+import fibonacci_engine
 
 importlib.reload(fo_stocks)
 importlib.reload(screener_engine)
@@ -25,6 +27,7 @@ importlib.reload(bollinger_screener)
 importlib.reload(volume_profile)
 importlib.reload(quantitative_filters)
 importlib.reload(mtf_breakout)
+importlib.reload(fibonacci_engine)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
 from screener_engine import fetch_universe_data, apply_screener_filters, fetch_and_screen, get_single_stock_chart_data
@@ -1136,7 +1139,7 @@ with tab5:
 
         # Fibonacci Retracement & Automated Targets Banner
         fb = chart_data.get("fib", {})
-        if fb and not np.isnan(fb.get("fib_0618", np.nan)):
+        if fb and pd.notna(fb.get("fib_0618")):
             st.markdown(f"""
             <div style="background: rgba(255, 213, 79, 0.08); border: 1px solid #FFD54F; border-radius: 6px; padding: 10px 14px; margin-top: 10px;">
                 <span style="font-weight: 700; color: #FFD54F;">📐 Fibonacci Retracement & Targets ({fb.get('fib_timeframe', '1-Hour')}):</span> &nbsp;

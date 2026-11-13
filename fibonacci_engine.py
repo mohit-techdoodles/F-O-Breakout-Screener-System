@@ -242,3 +242,4 @@ def compute_dual_timeframe_fibonacci(
         "macro": fib_macro,
         "micro": fib_micro
     }
+
