@@ -742,6 +742,7 @@ def calculate_fibonacci_v2_enhancements(
     curr_candles: pd.DataFrame,
     ltp: float,
     vp: Dict[str, float],
+    is_opt_c_breakin: bool = False,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
@@ -810,6 +811,12 @@ def calculate_fibonacci_v2_enhancements(
         "swing_type_1h": "Neutral",
         "fib_0618_1h": np.nan,
         "fib_0500_1h": np.nan,
+        # Core Golden Pocket & Golden Zone Setups (Section 4.2)
+        "is_golden_pocket": False,
+        "is_golden_pocket_confluence": False,
+        "is_golden_zone_pullback": False,
+        "dist_0618_pct": 999.0,
+        "retrace_pct_1h": 0.0,
     }
 
     if sub_intra is None or sub_intra.empty or len(sub_intra) < 5:
@@ -851,6 +858,25 @@ def calculate_fibonacci_v2_enhancements(
     default_res["swing_type_1h"] = st_1h
     default_res["fib_0618_1h"] = round(fib_0618, 2) if not np.isnan(fib_0618) else np.nan
     default_res["fib_0500_1h"] = round(fib_0500, 2) if not np.isnan(fib_0500) else np.nan
+
+    # Golden Pocket (0.618) Baseline Filters (Section 4.2)
+    dist_0618_pct = abs(ltp - fib_0618) / fib_0618 * 100.0 if (not np.isnan(fib_0618) and fib_0618 > 0) else 999.0
+    is_golden_pocket = bool(dist_0618_pct <= 0.50)  # within 0.5% tolerance
+    is_gp_confluence = bool(is_opt_c_breakin and is_golden_pocket)
+
+    # Golden Zone Retracement (50% - 61.8%)
+    rng_1h = sh_1h - sl_1h
+    if rng_1h > 0 and not np.isnan(sh_1h) and not np.isnan(sl_1h):
+        retrace_pct = ((sh_1h - ltp) / rng_1h * 100.0) if st_1h == "Bullish" else ((ltp - sl_1h) / rng_1h * 100.0)
+    else:
+        retrace_pct = 0.0
+    is_golden_zone = bool(50.0 <= retrace_pct <= 62.0)
+
+    default_res["is_golden_pocket"] = is_golden_pocket
+    default_res["is_golden_pocket_confluence"] = is_gp_confluence
+    default_res["is_golden_zone_pullback"] = is_golden_zone
+    default_res["dist_0618_pct"] = round(dist_0618_pct, 2)
+    default_res["retrace_pct_1h"] = round(retrace_pct, 1)
 
     # Point 1: MTF Clusters
     is_cl, cl_price, cl_lbls, _ = calculate_fibonacci_clusters(fibs_1h, fibs_15m, tolerance_pct=cluster_tol)

@@ -259,6 +259,9 @@ fib_confluence_filter = st.sidebar.selectbox(
     [
         "All",
         "Any Advanced Fibonacci Confluence Setup",
+        "⭐ Golden Pocket (0.618) Confluence (Option C Break-in)",
+        "🟡 At Golden Pocket (0.618 ±0.5%)",
+        "⚡ Pullback in Golden Zone (0.50 - 0.618)",
         "1. MTF Fibonacci Cluster Active",
         "2. Fibonacci Extension Breakout (1.272 / 1.618)",
         "3. Volume Profile + Golden Pocket Confluence",
@@ -271,7 +274,7 @@ fib_confluence_filter = st.sidebar.selectbox(
         "10. Inside Week + Golden Pocket Compression"
     ],
     index=0,
-    help="Developer Documentation: Advanced Fibonacci & Target Enhancements (Points 1 - 10)."
+    help="Select from Classic Golden Pocket setups (Option C Break-in, At 0.618, Golden Zone) or Advanced Points 1 - 10."
 )
 
 # Cache data loading
@@ -545,9 +548,10 @@ with tab_fib:
     ])
 
     with f_sub1:
-        st.markdown("##### Part I: MTF Clusters, Extension Breakouts, VP Confluence & Wick Rejections")
+        st.markdown("##### Part I: Golden Pocket (0.618), MTF Clusters, Extensions, VP Confluence & Wick Rejections")
         p1_cols = [
             "Symbol", "LTP", "Chg%", "Swing_Type_1H", "Fib_0618_1H",
+            "Is_Golden_Pocket_Confluence", "Is_Golden_Pocket", "Is_Golden_Zone_Pullback",
             "Is_Cluster_Active", "Cluster_Level_Price", "Cluster_Labels",
             "Is_Ext_Breakout", "Ext_Target_1", "Ext_Target_2", "Dist_To_Ext_1%", "Ext_Setup_Tag",
             "Vol_Fib_Confluence_Flag", "Confluence_Node_Type", "Confluence_Node_Price",
@@ -562,11 +566,13 @@ with tab_fib:
         vp_gp_active_df = p1_df[p1_df.get("Vol_Fib_Confluence_Flag", False) == True]
         wick_active_df = p1_df[p1_df.get("Is_Fib_Rejection", False) == True]
 
-        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
-        col_h1.metric("Active MTF Clusters", len(cl_active_df))
-        col_h2.metric("Extension Breakouts", len(ext_active_df))
-        col_h3.metric("VP + Golden Pocket", len(vp_gp_active_df))
-        col_h4.metric("15m Wick Rejections", len(wick_active_df))
+        col_h1, col_h2, col_h3, col_h4, col_h5, col_h6 = st.columns(6)
+        col_h1.metric("⭐ GP Confluence", stats.get("fib_gp_confluence_count", 0))
+        col_h2.metric("🟡 At Golden Pocket", stats.get("fib_at_gp_count", 0))
+        col_h3.metric("MTF Clusters", len(cl_active_df))
+        col_h4.metric("Extension Breakouts", len(ext_active_df))
+        col_h5.metric("VP + GP Confluence", len(vp_gp_active_df))
+        col_h6.metric("15m Wick Rejection", len(wick_active_df))
 
         st.dataframe(p1_df, use_container_width=True)
 

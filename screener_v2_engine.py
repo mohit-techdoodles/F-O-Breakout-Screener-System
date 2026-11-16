@@ -748,7 +748,8 @@ def fetch_universe_data_v2(
             prev_candles=prev_candles,
             curr_candles=curr_candles,
             ltp=ltp,
-            vp=vp
+            vp=vp,
+            is_opt_c_breakin=mtf_info.get("opt_c_breakin", False)
         )
 
         # 52W Proximity
@@ -875,7 +876,13 @@ def fetch_universe_data_v2(
             "Swing_Low_1H": fib_v2["swing_low_1h"],
             "Swing_Type_1H": fib_v2["swing_type_1h"],
             "Fib_0618_1H": fib_v2["fib_0618_1h"],
-            "Fib_0500_1H": fib_v2["fib_0500_1h"]
+            "Fib_0500_1H": fib_v2["fib_0500_1h"],
+            # Core Golden Pocket & Golden Zone Setups (Section 4.2)
+            "Is_Golden_Pocket": fib_v2.get("is_golden_pocket", False),
+            "Is_Golden_Pocket_Confluence": fib_v2.get("is_golden_pocket_confluence", False),
+            "Is_Golden_Zone_Pullback": fib_v2.get("is_golden_zone_pullback", False),
+            "Dist_0618%": fib_v2.get("dist_0618_pct", 999.0),
+            "Retrace%_1H": fib_v2.get("retrace_pct_1h", 0.0)
         })
 
     if not records:
@@ -997,7 +1004,13 @@ def apply_screener_v2_filters(
         cond_mz = pd.Series(True, index=filtered.index)
 
     # 6. Section 4 & Part II: Advanced Fibonacci & High Beta Confluence Filter
-    if fib_confluence_filter == "1. MTF Fibonacci Cluster Active":
+    if fib_confluence_filter in ["⭐ Golden Pocket (0.618) Confluence (Option C Break-in)", "⭐ Golden Pocket (0.618) Confluence (High Probability)"]:
+        cond_fib = filtered["Is_Golden_Pocket_Confluence"]
+    elif fib_confluence_filter in ["🟡 At Golden Pocket (0.618 ±0.5%)", "At Golden Pocket"]:
+        cond_fib = filtered["Is_Golden_Pocket"]
+    elif fib_confluence_filter in ["⚡ Pullback in Golden Zone (0.50 - 0.618)", "Pullback in Golden Zone"]:
+        cond_fib = filtered["Is_Golden_Zone_Pullback"]
+    elif fib_confluence_filter == "1. MTF Fibonacci Cluster Active":
         cond_fib = filtered["Is_Cluster_Active"]
     elif fib_confluence_filter == "2. Fibonacci Extension Breakout (1.272 / 1.618)":
         cond_fib = filtered["Is_Ext_Breakout"]
@@ -1019,6 +1032,9 @@ def apply_screener_v2_filters(
         cond_fib = filtered["Is_Inside_Week_GP_Bull"] | filtered["Is_Inside_Week_GP_Bear"]
     elif fib_confluence_filter == "Any Advanced Fibonacci Confluence Setup":
         cond_fib = (
+            filtered["Is_Golden_Pocket_Confluence"] |
+            filtered["Is_Golden_Pocket"] |
+            filtered["Is_Golden_Zone_Pullback"] |
             filtered["Is_Cluster_Active"] |
             filtered["Is_Ext_Breakout"] |
             filtered["Vol_Fib_Confluence_Flag"] |
@@ -1085,6 +1101,9 @@ def apply_screener_v2_filters(
         "macro_anchor_count": int((df["Is_Macro_Anchor_Bull"] | df["Is_Macro_Anchor_Bear"]).sum()) if "Is_Macro_Anchor_Bull" in df else 0,
         "weekly_cpr_fib_count": int(df["Weekly_CPR_Squeeze_Active"].sum()) if "Weekly_CPR_Squeeze_Active" in df else 0,
         "inside_week_gp_count": int((df["Is_Inside_Week_GP_Bull"] | df["Is_Inside_Week_GP_Bear"]).sum()) if "Is_Inside_Week_GP_Bull" in df else 0,
+        "fib_gp_confluence_count": int(df["Is_Golden_Pocket_Confluence"].sum()) if "Is_Golden_Pocket_Confluence" in df else 0,
+        "fib_at_gp_count": int(df["Is_Golden_Pocket"].sum()) if "Is_Golden_Pocket" in df else 0,
+        "fib_golden_zone_count": int(df["Is_Golden_Zone_Pullback"].sum()) if "Is_Golden_Zone_Pullback" in df else 0,
     }
 
     return all_filtered, bullish_df, bearish_df, meta_stats
