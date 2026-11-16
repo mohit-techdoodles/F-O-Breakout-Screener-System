@@ -5,12 +5,23 @@ Target Execution: Indian Equities (NSE) & F&O
 """
 
 import datetime
+import importlib
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+
+import fo_stocks
+import screener_v2_engine
+import fibonacci_screener_v2
+import mtf_breakout
+
+importlib.reload(fo_stocks)
+importlib.reload(screener_v2_engine)
+importlib.reload(fibonacci_screener_v2)
+importlib.reload(mtf_breakout)
 
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
@@ -601,7 +612,7 @@ with tab_fib:
 
     # Documentation & Formula Guide
     with st.expander("📖 Developer Documentation: Advanced Fibonacci & Target Specifications Guide"):
-        st.markdown("""
+        st.markdown(r"""
         ### Part I: Advanced Fibonacci & Target Enhancements
         1. **Fibonacci Cluster (MTF Confluence) Filter:**
            - Detects institutional support/resistance where 1-Hour Macro and 15-Minute Micro Fibonacci levels align within `±0.5%`.
@@ -736,7 +747,7 @@ with tab4:
 # =====================================================================
 with tab5:
     st.markdown("#### 📜 Screener Architecture V2.0 Specifications & Pine Script v5")
-    st.markdown("""
+    st.markdown(r"""
     This system implements the exact specifications from **Screener Architecture V2.0 (November 2026)** and **Advanced Fibonacci & Target Enhancements**:
     - **1. Core MTF Strategy:**
       - Daily (1D): PDH / PDL shifted by 1 period.

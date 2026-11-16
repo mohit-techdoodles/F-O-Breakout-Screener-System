@@ -899,7 +899,8 @@ def apply_screener_v2_filters(
     pcr_squeeze_filter: str = "All",
     money_zone_setup_filter: str = "All",
     mtf_confluence_filter: str = "All",
-    fib_confluence_filter: str = "All"
+    fib_confluence_filter: str = "All",
+    **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """
     Applies in-memory vectorized filtering for Screener Architecture V2.0.
