@@ -34,6 +34,8 @@ def calculate_volume_profile(
             "Day_High": np.nan,
             "Day_Low": np.nan,
             "Day_Close": np.nan,
+            "poc_price": np.nan,
+            "top_hvns": []
         }
 
     # Ensure required columns exist
@@ -57,6 +59,8 @@ def calculate_volume_profile(
             "Day_High": day_high,
             "Day_Low": day_low,
             "Day_Close": day_close,
+            "poc_price": day_close,
+            "top_hvns": []
         }
 
     # Create uniform price bins across the day's range
@@ -127,6 +131,15 @@ def calculate_volume_profile(
     vah_price = float(bin_edges[vah_idx + 1])
     val_price = float(bin_edges[val_idx])
 
+    # Find local peaks for High Volume Nodes (HVNs) for confluence scanning
+    peaks = []
+    for i in range(1, num_bins - 1):
+        if bin_volumes[i] > bin_volumes[i-1] and bin_volumes[i] > bin_volumes[i+1]:
+            if i != poc_idx:
+                peaks.append((i, bin_volumes[i], bin_centers[i]))
+    peaks.sort(key=lambda x: x[1], reverse=True)
+    top_hvns = [round(float(p[2]), 2) for p in peaks[:3]]
+
     return {
         "PD_POC": round(poc_price, 2),
         "PD_VAH": round(vah_price, 2),
@@ -135,6 +148,8 @@ def calculate_volume_profile(
         "Day_High": round(day_high, 2),
         "Day_Low": round(day_low, 2),
         "Day_Close": round(day_close, 2),
+        "poc_price": round(poc_price, 2),
+        "top_hvns": top_hvns
     }
 
 

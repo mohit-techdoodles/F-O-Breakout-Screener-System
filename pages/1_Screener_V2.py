@@ -26,6 +26,8 @@ importlib.reload(mtf_breakout)
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
     fetch_universe_data_v2,
+    fetch_daily_1y_data_v2,
+    fetch_intraday_data_v2,
     apply_screener_v2_filters,
     calculate_mtf_v2
 )
@@ -277,18 +279,40 @@ fib_confluence_filter = st.sidebar.selectbox(
     help="Select from Classic Golden Pocket setups (Option C Break-in, At 0.618, Golden Zone) or Advanced Points 1 - 10."
 )
 
-# Cache data loading
-@st.cache_data(ttl=90, show_spinner=False)
-def get_v2_data(syms, tf):
-    return fetch_universe_data_v2(syms, timeframe=tf)
+# Two-tier optimized caching:
+# 1. Daily 1-year data cached for 2 hours (historical bars don't change intraday)
+# 2. Intraday 5-day data cached for 120 seconds
+@st.cache_data(ttl=7200, show_spinner=False)
+def get_daily_1y_data_cached(syms):
+    return fetch_daily_1y_data_v2(syms)
 
-# Refresh Button
-if st.sidebar.button("🔄 Refresh Market Data", use_container_width=True):
-    st.cache_data.clear()
+@st.cache_data(ttl=120, show_spinner=False)
+def get_intraday_data_cached(syms, tf):
+    return fetch_intraday_data_v2(syms, timeframe=tf)
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_v2_data(syms, tf):
+    d_1y = get_daily_1y_data_cached(syms)
+    d_intra = get_intraday_data_cached(syms, tf)
+    return fetch_universe_data_v2(syms, timeframe=tf, df_1y=d_1y, df_intraday=d_intra)
+
+# Refresh Buttons
+c_ref1, c_ref2 = st.sidebar.columns([3, 1])
+with c_ref1:
+    if st.button("🔄 Refresh Data", use_container_width=True):
+        get_intraday_data_cached.clear()
+        get_v2_data.clear()
+with c_ref2:
+    if st.button("⚡ Reset", help="Hard reset all caches including 1Y Daily data"):
+        st.cache_data.clear()
 
 # ----------------- Data Ingestion -----------------
 with st.spinner(f"Scanning market data for {len(selected_symbols)} F&O symbols (Architecture V2.0)..."):
     raw_df, base_meta = get_v2_data(selected_symbols, timeframe)
+    if "intraday_cache" in base_meta:
+        st.session_state["intraday_cache_v2"] = base_meta["intraday_cache"]
+    if "daily_cache" in base_meta:
+        st.session_state["daily_cache_v2"] = base_meta["daily_cache"]
 
 if raw_df.empty:
     st.warning("⚠️ No data was returned. Please verify network connectivity or market symbols.")
@@ -649,10 +673,13 @@ with tab4:
     chart_sym = st.selectbox("Select Symbol for Deep Dive", options=selected_symbols, index=0)
 
     try:
-        t_sym = f"{chart_sym}.NS"
-        df_chart_raw = yf.download(t_sym, period="5d", interval=timeframe, progress=False)
-        if isinstance(df_chart_raw.columns, pd.MultiIndex):
-            df_chart_raw.columns = df_chart_raw.columns.get_level_values(-1)
+        # Retrieve from in-memory intraday cache first for zero-latency instant rendering (< 5ms)
+        df_chart_raw = st.session_state.get("intraday_cache_v2", {}).get(chart_sym)
+        if df_chart_raw is None or df_chart_raw.empty:
+            t_sym = f"{chart_sym}.NS"
+            df_chart_raw = yf.download(t_sym, period="5d", interval=timeframe, progress=False)
+            if isinstance(df_chart_raw.columns, pd.MultiIndex):
+                df_chart_raw.columns = df_chart_raw.columns.get_level_values(-1)
 
         if not df_chart_raw.empty:
             chart_mtf = calculate_mtf_v2(df_chart_raw)

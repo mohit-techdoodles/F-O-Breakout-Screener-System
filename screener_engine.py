@@ -10,7 +10,8 @@ Enhanced with:
 """
 
 import datetime
-from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -23,13 +24,77 @@ from mtf_breakout import calculate_mtf_breakout
 from fibonacci_engine import compute_dual_timeframe_fibonacci, calculate_fibonacci_levels
 
 
+def download_chunked(
+    tickers: List[str], 
+    period: str, 
+    interval: str, 
+    group_by: str = "ticker", 
+    chunk_size: int = 60,
+    max_workers: int = 4
+) -> pd.DataFrame:
+    """
+    Downloads market data in parallel chunks to prevent Yahoo Finance HTTP 429
+    rate limits and socket thread pool exhaustion on large universes.
+    """
+    if not tickers:
+        return pd.DataFrame()
+
+    if len(tickers) <= chunk_size:
+        try:
+            return yf.download(tickers, period=period, interval=interval, group_by=group_by, progress=False, threads=True)
+        except Exception:
+            return pd.DataFrame()
+
+    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+    
+    def _fetch_single_chunk(c: List[str]) -> pd.DataFrame:
+        try:
+            df = yf.download(c, period=period, interval=interval, group_by=group_by, progress=False, threads=True)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass
+        # Retry once on failure
+        try:
+            return yf.download(c, period=period, interval=interval, group_by=group_by, progress=False, threads=True)
+        except Exception:
+            return pd.DataFrame()
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(chunks))) as executor:
+        results = list(executor.map(_fetch_single_chunk, chunks))
+
+    valid_dfs = [df for df in results if df is not None and not df.empty]
+    if not valid_dfs:
+        return pd.DataFrame()
+
+    try:
+        merged = pd.concat(valid_dfs, axis=1)
+        return merged
+    except Exception:
+        return valid_dfs[0]
+
+
+def fetch_daily_1y_data(symbols: List[str]) -> pd.DataFrame:
+    """Fetches 1-year daily OHLC data for the universe with parallel chunking."""
+    yf_tickers = [get_yf_symbol(s) for s in symbols]
+    return download_chunked(yf_tickers, period="1y", interval="1d", chunk_size=60)
+
+
+def fetch_intraday_data(symbols: List[str], timeframe: str = "5m") -> pd.DataFrame:
+    """Fetches 5-day intraday OHLC data for the universe with parallel chunking."""
+    yf_tickers = [get_yf_symbol(s) for s in symbols]
+    return download_chunked(yf_tickers, period="5d", interval=timeframe, chunk_size=60)
+
+
 def fetch_universe_data(
     symbols: List[str], 
-    timeframe: str = "5m"
-) -> Tuple[pd.DataFrame, Dict[str, any]]:
+    timeframe: str = "5m",
+    df_1y: Optional[pd.DataFrame] = None,
+    df_intraday: Optional[pd.DataFrame] = None
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Downloads market data and computes all indicators for all stocks.
-    This is the heavy network + compute function that should be cached.
+    Supports passing pre-cached daily and intraday DataFrames for 2-tier caching.
     """
     if not symbols:
         empty = pd.DataFrame()
@@ -38,33 +103,23 @@ def fetch_universe_data(
     yf_tickers = [get_yf_symbol(s) for s in symbols]
     ticker_to_sym = {get_yf_symbol(s): s for s in symbols}
 
-    # 1. Batch download 1-year daily data for 52W High & 52W Low & Bollinger Bands
-    try:
-        df_1y = yf.download(
-            yf_tickers,
-            period="1y",
-            interval="1d",
-            group_by="ticker",
-            progress=False,
-            threads=True
-        )
-    except Exception:
-        df_1y = pd.DataFrame()
+    # 1. Download 1-year daily data if not provided
+    if df_1y is None or df_1y.empty:
+        try:
+            df_1y = fetch_daily_1y_data(symbols)
+        except Exception:
+            df_1y = pd.DataFrame()
 
-    # 2. Batch download 5-day intraday data for Volume Profile
-    try:
-        df_intraday = yf.download(
-            yf_tickers,
-            period="5d",
-            interval=timeframe,
-            group_by="ticker",
-            progress=False,
-            threads=True
-        )
-    except Exception:
-        df_intraday = pd.DataFrame()
+    # 2. Download 5-day intraday data if not provided
+    if df_intraday is None or df_intraday.empty:
+        try:
+            df_intraday = fetch_intraday_data(symbols, timeframe=timeframe)
+        except Exception:
+            df_intraday = pd.DataFrame()
 
     records = []
+    intraday_cache = {}
+    daily_cache = {}
     ref_date_str = "N/A"
     live_date_str = "N/A"
 
@@ -121,6 +176,9 @@ def fetch_universe_data(
         if prev_candles.empty or curr_candles.empty:
             continue
 
+        # Cache in-memory candles for instant chart rendering
+        intraday_cache[sym] = sub_intra
+
         # Compute Volume Profile for Previous Day
         vp = calculate_volume_profile(prev_candles)
         if np.isnan(vp["PD_VAH"]) or np.isnan(vp["PD_VAL"]):
@@ -144,6 +202,7 @@ def fetch_universe_data(
                 sub_1y = df_1y.dropna(how="all")
 
             if not sub_1y.empty:
+                daily_cache[sym] = sub_1y
                 h52 = float(sub_1y["High"].max())
                 l52 = float(sub_1y["Low"].min())
         except Exception:
@@ -396,7 +455,13 @@ def fetch_universe_data(
 
     if not records:
         empty = pd.DataFrame()
-        return empty, {"ref_date": ref_date_str, "live_date": live_date_str, "total_scanned": 0}
+        return empty, {
+            "ref_date": ref_date_str,
+            "live_date": live_date_str,
+            "total_scanned": 0,
+            "intraday_cache": intraday_cache,
+            "daily_cache": daily_cache
+        }
 
     df = pd.DataFrame(records)
 
@@ -413,7 +478,9 @@ def fetch_universe_data(
     base_meta = {
         "ref_date": ref_date_str,
         "live_date": live_date_str,
-        "total_scanned": len(df)
+        "total_scanned": len(df),
+        "intraday_cache": intraday_cache,
+        "daily_cache": daily_cache
     }
 
     return df, base_meta
@@ -747,17 +814,26 @@ def fetch_and_screen(
     )
 
 
-def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
+def get_single_stock_chart_data(
+    symbol: str, 
+    timeframe: str = "5m",
+    intraday_df: Optional[pd.DataFrame] = None,
+    daily_df: Optional[pd.DataFrame] = None
+) -> Dict:
     """
-    Fetches intraday data and computes Volume Profile, CPR, Camarilla, and Bollinger Bands for charting
+    Fetches intraday data and computes Volume Profile, CPR, Camarilla, and Bollinger Bands for charting.
+    Reuses cached intraday_df and daily_df when provided for instantaneous zero-latency rendering.
     """
     ticker = get_yf_symbol(symbol)
-    df = yf.download(ticker, period="5d", interval=timeframe, progress=False)
+    if intraday_df is not None and not intraday_df.empty:
+        df = intraday_df.copy()
+    else:
+        df = yf.download(ticker, period="5d", interval=timeframe, progress=False)
     if df.empty:
         return {}
 
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+        df.columns = df.columns.get_level_values(-1)
 
     dates = sorted(list(set(df.index.date)))
     if len(dates) < 2:
@@ -830,9 +906,16 @@ def get_single_stock_chart_data(symbol: str, timeframe: str = "5m") -> Dict:
     # Quantitative Filters & Bollinger Bands for daily
     quant = {}
     try:
-        daily_df = yf.download(ticker, period="1y", interval="1d", progress=False)
-        bb = calculate_bollinger_bands(daily_df)
-        quant = get_quant_metrics_for_stock(daily_df, curr_day_vol=float(curr_df["Volume"].sum()))
+        if daily_df is not None and not daily_df.empty:
+            d_df = daily_df.copy()
+            if isinstance(d_df.columns, pd.MultiIndex):
+                d_df.columns = d_df.columns.get_level_values(-1)
+        else:
+            d_df = yf.download(ticker, period="1y", interval="1d", progress=False)
+            if isinstance(d_df.columns, pd.MultiIndex):
+                d_df.columns = d_df.columns.get_level_values(-1)
+        bb = calculate_bollinger_bands(d_df)
+        quant = get_quant_metrics_for_stock(d_df, curr_day_vol=float(curr_df["Volume"].sum()))
     except Exception:
         bb = {}
 

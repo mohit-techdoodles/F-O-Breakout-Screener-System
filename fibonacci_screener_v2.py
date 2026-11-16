@@ -514,7 +514,9 @@ def calculate_prem_disc_oscillator(
 def calculate_macro_anchor(
     df_daily: pd.DataFrame,
     ltp: float,
-    macro_confluence_pct: float = 0.015
+    macro_confluence_pct: float = 0.015,
+    df_w: Optional[pd.DataFrame] = None,
+    df_m: Optional[pd.DataFrame] = None
 ) -> Tuple[bool, bool, float, str]:
     """
     Point 8: Swing: The Macro Anchor (Monthly Value + Weekly Fib)
@@ -526,12 +528,16 @@ def calculate_macro_anchor(
     if df_daily.empty or len(df_daily) < 40:
         return False, False, np.nan, "None"
 
-    # Resample Monthly to get Previous Month metrics
-    df_m = df_daily.resample("ME").agg({
-        "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
-    }).dropna(subset=["Close"])
+    # Resample Monthly to get Previous Month metrics (reusing df_m if pre-calculated)
+    if df_m is None:
+        try:
+            df_m = df_daily.resample("ME").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
+        except Exception:
+            return False, False, np.nan, "None"
 
-    if len(df_m) < 2:
+    if df_m is None or len(df_m) < 2:
         return False, False, np.nan, "None"
 
     m_prev = df_m.iloc[-2]
@@ -543,12 +549,16 @@ def calculate_macro_anchor(
     mr2 = mp + (mh - ml)
     mpoc = (mh + ml + mc) / 3.0  # Proxy for MPOC from monthly VWAP / typical price
 
-    # Weekly Swing Fib
-    df_w = df_daily.resample("W-FRI").agg({
-        "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
-    }).dropna(subset=["Close"])
+    # Weekly Swing Fib (reusing df_w if pre-calculated)
+    if df_w is None:
+        try:
+            df_w = df_daily.resample("W-FRI").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
+        except Exception:
+            return False, False, np.nan, "None"
 
-    if len(df_w) < 4:
+    if df_w is None or len(df_w) < 4:
         return False, False, np.nan, "None"
 
     w_lookback = df_w.iloc[-15:]
@@ -618,7 +628,8 @@ def calculate_macro_anchor(
 
 def calculate_weekly_cpr_fib_expansion(
     df_daily: pd.DataFrame,
-    ltp: float
+    ltp: float,
+    df_w: Optional[pd.DataFrame] = None
 ) -> Tuple[bool, bool, bool, float, float]:
     """
     Point 9: Swing: Weekly CPR Squeeze & Fib Expansion
@@ -628,14 +639,18 @@ def calculate_weekly_cpr_fib_expansion(
     Bearish Expansion: Daily close < Previous Week's VAL AND < Weekly CPR.
                        Project -0.272 and -0.618 extensions.
     """
-    if df_daily.empty or len(df_daily) < 15:
-        return False, False, False, np.nan, np.nan
+    if df_w is None:
+        if df_daily.empty or len(df_daily) < 15:
+            return False, False, False, np.nan, np.nan
 
-    df_w = df_daily.resample("W-FRI").agg({
-        "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
-    }).dropna(subset=["Close"])
+        try:
+            df_w = df_daily.resample("W-FRI").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
+        except Exception:
+            return False, False, False, np.nan, np.nan
 
-    if len(df_w) < 2:
+    if df_w is None or len(df_w) < 2:
         return False, False, False, np.nan, np.nan
 
     prev_w = df_w.iloc[-2]
@@ -678,7 +693,8 @@ def calculate_weekly_cpr_fib_expansion(
 
 def calculate_inside_week_gp_compression(
     df_daily: pd.DataFrame,
-    macro_fib_0618: float
+    macro_fib_0618: float,
+    df_w: Optional[pd.DataFrame] = None
 ) -> Tuple[bool, bool, str]:
     """
     Point 10: Swing: Inside Week + Golden Pocket Compression
@@ -686,14 +702,21 @@ def calculate_inside_week_gp_compression(
     Condition 2: Inside Week Close within ±1% of Macro 0.618 Fib level
     Condition 3: Weekly POC in lower 30% of range (Bullish) or upper 30% (Bearish).
     """
-    if df_daily.empty or len(df_daily) < 15 or np.isnan(macro_fib_0618) or macro_fib_0618 <= 0:
+    if np.isnan(macro_fib_0618) or macro_fib_0618 <= 0:
         return False, False, "None"
 
-    df_w = df_daily.resample("W-FRI").agg({
-        "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
-    }).dropna(subset=["Close"])
+    if df_w is None:
+        if df_daily.empty or len(df_daily) < 15:
+            return False, False, "None"
 
-    if len(df_w) < 2:
+        try:
+            df_w = df_daily.resample("W-FRI").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
+        except Exception:
+            return False, False, "None"
+
+    if df_w is None or len(df_w) < 2:
         return False, False, "None"
 
     curr_w = df_w.iloc[-1]
@@ -743,7 +766,10 @@ def calculate_fibonacci_v2_enhancements(
     ltp: float,
     vp: Dict[str, float],
     is_opt_c_breakin: bool = False,
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    df_w: Optional[pd.DataFrame] = None,
+    df_m: Optional[pd.DataFrame] = None,
+    df_15m: Optional[pd.DataFrame] = None
 ) -> Dict[str, Any]:
     """
     Master pipeline evaluating all 10 Fibonacci & High Beta F&O Confluence enhancements.
@@ -827,15 +853,16 @@ def calculate_fibonacci_v2_enhancements(
     if isinstance(df_in.columns, pd.MultiIndex):
         df_in.columns = df_in.columns.get_level_values(0)
 
-    # Resample 1H and 15m
+    # Resample 1H (and 15m if not provided)
     try:
         df_1h = df_in.resample("1h", closed="left", label="left").agg({
             "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
         }).dropna(subset=["Close"])
 
-        df_15m = df_in.resample("15min", closed="left", label="left").agg({
-            "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
-        }).dropna(subset=["Close"])
+        if df_15m is None:
+            df_15m = df_in.resample("15min", closed="left", label="left").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
     except Exception:
         return default_res
 
@@ -895,7 +922,12 @@ def calculate_fibonacci_v2_enhancements(
     default_res["ext_setup_tag"] = ext_tag
 
     # Point 3: Volume Profile + Golden Pocket Confluence
-    poc_val, hvns = calculate_volume_profile_and_hvns(prev_candles)
+    if "poc_price" in vp and "top_hvns" in vp and vp["poc_price"] is not None and not np.isnan(vp["poc_price"]):
+        poc_val = float(vp["poc_price"])
+        hvns = vp["top_hvns"]
+    else:
+        poc_val, hvns = calculate_volume_profile_and_hvns(prev_candles)
+
     is_vol_fib, node_type, node_price = calculate_vol_fib_confluence(
         fib_0618, poc_val, hvns, tolerance_pct=vol_tol, require_poc_only=req_poc_only
     )
@@ -954,9 +986,26 @@ def calculate_fibonacci_v2_enhancements(
     default_res["prem_disc_status"] = prem_status
     default_res["dist_from_poc_atr"] = dist_atr
 
+    # Pre-resample df_d to Weekly and Monthly ONCE if not provided (major speed optimization)
+    if df_w is None and not df_d.empty and len(df_d) >= 15:
+        try:
+            df_w = df_d.resample("W-FRI").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
+        except Exception:
+            df_w = None
+
+    if df_m is None and not df_d.empty and len(df_d) >= 40:
+        try:
+            df_m = df_d.resample("ME").agg({
+                "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Close"])
+        except Exception:
+            df_m = None
+
     # Point 8: Macro Anchor
     is_ma_bull, is_ma_bear, ma_zone, ma_tag = calculate_macro_anchor(
-        df_d, ltp, macro_confluence_pct=macro_tol
+        df_d, ltp, macro_confluence_pct=macro_tol, df_w=df_w, df_m=df_m
     )
     default_res["is_macro_anchor_bull"] = is_ma_bull
     default_res["is_macro_anchor_bear"] = is_ma_bear
@@ -964,7 +1013,7 @@ def calculate_fibonacci_v2_enhancements(
     default_res["macro_anchor_tag"] = ma_tag
 
     # Point 9: Weekly CPR Squeeze & Fib Expansion
-    is_w_cpr, is_w_bull, is_w_bear, wt1, wt2 = calculate_weekly_cpr_fib_expansion(df_d, ltp)
+    is_w_cpr, is_w_bull, is_w_bear, wt1, wt2 = calculate_weekly_cpr_fib_expansion(df_d, ltp, df_w=df_w)
     default_res["weekly_cpr_squeeze_active"] = is_w_cpr
     default_res["weekly_fib_exp_bull"] = is_w_bull
     default_res["weekly_fib_exp_bear"] = is_w_bear
@@ -972,7 +1021,7 @@ def calculate_fibonacci_v2_enhancements(
     default_res["weekly_fib_target_2"] = wt2
 
     # Point 10: Inside Week + Golden Pocket Compression
-    is_iw_bull, is_iw_bear, iw_status = calculate_inside_week_gp_compression(df_d, fib_0618)
+    is_iw_bull, is_iw_bear, iw_status = calculate_inside_week_gp_compression(df_d, fib_0618, df_w=df_w)
     default_res["is_inside_week_gp_bull"] = is_iw_bull
     default_res["is_inside_week_gp_bear"] = is_iw_bear
     default_res["inside_week_gp_status"] = iw_status

@@ -30,7 +30,14 @@ importlib.reload(mtf_breakout)
 importlib.reload(fibonacci_engine)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
-from screener_engine import fetch_universe_data, apply_screener_filters, fetch_and_screen, get_single_stock_chart_data
+from screener_engine import (
+    fetch_universe_data,
+    fetch_daily_1y_data,
+    fetch_intraday_data,
+    apply_screener_filters,
+    fetch_and_screen,
+    get_single_stock_chart_data
+)
 from chart_utils import create_breakout_chart
 from mtf_breakout import PINE_SCRIPT_V5_CODE
 
@@ -290,14 +297,29 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Live Refresh")
 auto_refresh = st.sidebar.selectbox("Auto Refresh Interval", ["Off", "30 Seconds", "60 Seconds", "120 Seconds"], index=0)
 
-refresh_clicked = st.sidebar.button("🔄 Scan Now", **get_width_kw(st.button))
+# Refresh Buttons
+c_scan1, c_scan2 = st.sidebar.columns([3, 1])
+with c_scan1:
+    refresh_clicked = st.button("🔄 Scan Now", **get_width_kw(st.button))
+with c_scan2:
+    hard_reset = st.button("⚡ Reset", help="Hard reset all caches including 1Y Daily data")
 
-# Helper function to cache raw market data & indicator calculations
-# Heavy network fetch + indicator computation is cached by symbols & timeframe.
-# Vectorized filters are applied dynamically in memory in < 1 millisecond.
-@st.cache_data(ttl=90, show_spinner=False)
+# Two-tier optimized caching:
+# 1. Daily 1-year data cached for 2 hours (historical bars don't change intraday)
+# 2. Intraday 5-day data cached for 120 seconds
+@st.cache_data(ttl=7200, show_spinner=False)
+def get_daily_1y_data_cached_v1(syms):
+    return fetch_daily_1y_data(syms)
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_intraday_data_cached_v1(syms, tf):
+    return fetch_intraday_data(syms, timeframe=tf)
+
+@st.cache_data(ttl=120, show_spinner=False)
 def get_cached_raw_data(syms, tf):
-    return fetch_universe_data(syms, timeframe=tf)
+    d_1y = get_daily_1y_data_cached_v1(syms)
+    d_intra = get_intraday_data_cached_v1(syms, tf)
+    return fetch_universe_data(syms, timeframe=tf, df_1y=d_1y, df_intraday=d_intra)
 
 
 # Header & Market Status (Explicitly in Indian Standard Time - IST)
@@ -332,10 +354,18 @@ with col_time:
 
 # Execute Screening with progress feedback
 if refresh_clicked:
+    get_intraday_data_cached_v1.clear()
+    get_cached_raw_data.clear()
+
+if hard_reset:
     st.cache_data.clear()
 
 with st.spinner(f"Fetching market data for {len(selected_symbols)} F&O stocks..."):
     master_df, base_meta = get_cached_raw_data(selected_symbols, timeframe)
+    if "intraday_cache" in base_meta:
+        st.session_state["intraday_cache_v1"] = base_meta["intraday_cache"]
+    if "daily_cache" in base_meta:
+        st.session_state["daily_cache_v1"] = base_meta["daily_cache"]
 
 if master_df.empty:
     st.warning("⚠️ No data was returned. Please verify your connection or refresh.")
@@ -1107,8 +1137,10 @@ with tab5:
             index=all_df["Symbol"].tolist().index(default_chart_sym) if default_chart_sym in all_df["Symbol"].tolist() else 0
         )
 
-    # Fetch single stock candle data
-    chart_data = get_single_stock_chart_data(chart_sym, timeframe=timeframe)
+    # Fetch single stock candle data using in-memory cache (< 5ms)
+    intra_cached = st.session_state.get("intraday_cache_v1", {}).get(chart_sym)
+    daily_cached = st.session_state.get("daily_cache_v1", {}).get(chart_sym)
+    chart_data = get_single_stock_chart_data(chart_sym, timeframe=timeframe, intraday_df=intra_cached, daily_df=daily_cached)
     if chart_data and not chart_data["prev_df"].empty and not chart_data["curr_df"].empty:
         stock_row = all_df[all_df["Symbol"] == chart_sym].iloc[0]
         

@@ -8,6 +8,7 @@ Technical Specifications based on Screener Architecture V2.0 (November 2026):
 """
 
 import datetime
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple, Any
 from zoneinfo import ZoneInfo
 import numpy as np
@@ -72,7 +73,8 @@ def calculate_mtf_v2(
         "mtf_bearish": False,
         "mtf_signal": "None",
         "vwap_series": pd.Series(dtype=float),
-        "curr_15m_df": pd.DataFrame()
+        "curr_15m_df": pd.DataFrame(),
+        "df_15m_all": pd.DataFrame()
     }
 
     if sub_intra is None or sub_intra.empty or len(sub_intra) < 2:
@@ -316,7 +318,8 @@ def calculate_mtf_v2(
         "mtf_bearish": mtf_bearish,
         "mtf_signal": mtf_signal,
         "vwap_series": today_bars["VWAP"],
-        "curr_15m_df": today_bars
+        "curr_15m_df": today_bars,
+        "df_15m_all": df_15m
     }
 
 
@@ -433,7 +436,11 @@ def calculate_volume_and_derivatives_v2(
 # 3. WEEKLY PIVOT & MONEY ZONE MATRIX (FORWARD-LOOKING FOR MONDAY)
 # =====================================================================
 
-def calculate_weekly_money_zone_v2(daily_df: pd.DataFrame, ltp: float) -> Dict[str, Any]:
+def calculate_weekly_money_zone_v2(
+    daily_df: pd.DataFrame, 
+    ltp: float,
+    df_w: Optional[pd.DataFrame] = None
+) -> Dict[str, Any]:
     """
     Section 3: Weekly Pivot & Money Zone Matrix
     Forward-looking calculations (run on Friday afternoons / weekends) to generate the watchlist
@@ -483,25 +490,28 @@ def calculate_weekly_money_zone_v2(daily_df: pd.DataFrame, ltp: float) -> Dict[s
         "watchlist_setups": []
     }
 
-    if daily_df.empty or len(daily_df) < 10:
-        return default_res
-
-    df = daily_df.copy()
-    if not isinstance(df.index, pd.DatetimeIndex):
-        try:
-            df.index = pd.to_datetime(df.index)
-        except Exception:
+    if df_w is not None and not df_w.empty:
+        weekly_df = df_w[["High", "Low", "Close"]].dropna()
+    else:
+        if daily_df.empty or len(daily_df) < 10:
             return default_res
 
-    # Resample daily data to Friday-ending weeks
-    try:
-        weekly_df = df.resample("W-FRI").agg({
-            "High": "max",
-            "Low": "min",
-            "Close": "last"
-        }).dropna()
-    except Exception:
-        return default_res
+        df = daily_df.copy()
+        if not isinstance(df.index, pd.DatetimeIndex):
+            try:
+                df.index = pd.to_datetime(df.index)
+            except Exception:
+                return default_res
+
+        # Resample daily data to Friday-ending weeks
+        try:
+            weekly_df = df.resample("W-FRI").agg({
+                "High": "max",
+                "Low": "min",
+                "Close": "last"
+            }).dropna()
+        except Exception:
+            return default_res
 
     if len(weekly_df) < 2:
         return default_res
@@ -604,9 +614,75 @@ def calculate_weekly_money_zone_v2(daily_df: pd.DataFrame, ltp: float) -> Dict[s
 # 4. MASTER DATA FETCH & PIPELINE FOR V2
 # =====================================================================
 
+def download_chunked(
+    tickers: List[str], 
+    period: str, 
+    interval: str, 
+    group_by: str = "ticker", 
+    chunk_size: int = 60,
+    max_workers: int = 4
+) -> pd.DataFrame:
+    """
+    Downloads market data in parallel chunks to prevent Yahoo Finance HTTP 429
+    rate limits and socket thread pool exhaustion on large universes.
+    """
+    if not tickers:
+        return pd.DataFrame()
+
+    if len(tickers) <= chunk_size:
+        try:
+            return yf.download(tickers, period=period, interval=interval, group_by=group_by, progress=False, threads=True)
+        except Exception:
+            return pd.DataFrame()
+
+    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+    
+    def _fetch_single_chunk(c: List[str]) -> pd.DataFrame:
+        try:
+            df = yf.download(c, period=period, interval=interval, group_by=group_by, progress=False, threads=True)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass
+        # Retry once on failure
+        try:
+            return yf.download(c, period=period, interval=interval, group_by=group_by, progress=False, threads=True)
+        except Exception:
+            return pd.DataFrame()
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(chunks))) as executor:
+        results = list(executor.map(_fetch_single_chunk, chunks))
+
+    valid_dfs = [df for df in results if df is not None and not df.empty]
+    if not valid_dfs:
+        return pd.DataFrame()
+
+    try:
+        merged = pd.concat(valid_dfs, axis=1)
+        return merged
+    except Exception:
+        return valid_dfs[0]
+
+
+def fetch_daily_1y_data_v2(symbols: List[str]) -> pd.DataFrame:
+    """Fetches 1-year daily OHLC data for the universe with parallel chunking."""
+    clean_syms = [s.strip().upper() for s in symbols if sanitize_symbol(s)]
+    yf_tickers = [get_yf_symbol(s) for s in clean_syms]
+    return download_chunked(yf_tickers, period="1y", interval="1d", chunk_size=60)
+
+
+def fetch_intraday_data_v2(symbols: List[str], timeframe: str = "5m") -> pd.DataFrame:
+    """Fetches 5-day intraday OHLC data for the universe with parallel chunking."""
+    clean_syms = [s.strip().upper() for s in symbols if sanitize_symbol(s)]
+    yf_tickers = [get_yf_symbol(s) for s in clean_syms]
+    return download_chunked(yf_tickers, period="5d", interval=timeframe, chunk_size=60)
+
+
 def fetch_universe_data_v2(
     symbols: List[str],
-    timeframe: str = "5m"
+    timeframe: str = "5m",
+    df_1y: Optional[pd.DataFrame] = None,
+    df_intraday: Optional[pd.DataFrame] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Downloads market data and computes all metrics for Screener Architecture V2.0:
@@ -621,33 +697,23 @@ def fetch_universe_data_v2(
     yf_tickers = [get_yf_symbol(s) for s in clean_syms]
     ticker_to_sym = {get_yf_symbol(s): s for s in clean_syms}
 
-    # 1. Download 1-year daily data for 52W levels, RVOL, and Weekly Pivot Matrix
-    try:
-        df_1y = yf.download(
-            yf_tickers,
-            period="1y",
-            interval="1d",
-            group_by="ticker",
-            progress=False,
-            threads=True
-        )
-    except Exception:
-        df_1y = pd.DataFrame()
+    # 1. Download 1-year daily data if not provided (with chunked concurrency)
+    if df_1y is None or df_1y.empty:
+        try:
+            df_1y = fetch_daily_1y_data_v2(clean_syms)
+        except Exception:
+            df_1y = pd.DataFrame()
 
-    # 2. Download 5-day intraday data for Volume Profile, MTF 1H IB, and VWAP
-    try:
-        df_intraday = yf.download(
-            yf_tickers,
-            period="5d",
-            interval=timeframe,
-            group_by="ticker",
-            progress=False,
-            threads=True
-        )
-    except Exception:
-        df_intraday = pd.DataFrame()
+    # 2. Download 5-day intraday data if not provided (with chunked concurrency)
+    if df_intraday is None or df_intraday.empty:
+        try:
+            df_intraday = fetch_intraday_data_v2(clean_syms, timeframe=timeframe)
+        except Exception:
+            df_intraday = pd.DataFrame()
 
     records = []
+    intraday_cache = {}
+    daily_cache = {}
     live_date_str = "N/A"
 
     for t in yf_tickers:
@@ -730,16 +796,31 @@ def fetch_universe_data_v2(
         prev_close = float(prev_candles[close_col].iloc[-1])
         chg_pct = ((ltp - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
 
+        # Store in-memory caches for instant zero-latency chart rendering
+        intraday_cache[sym] = sub_intra
+        if not sub_1y.empty:
+            daily_cache[sym] = sub_1y
+
         # Section 1: Core MTF Breakout Algorithm
         prev_h = float(prev_candles[high_col].max())
         prev_l = float(prev_candles[low_col].min())
         mtf_info = calculate_mtf_v2(sub_intra, pdh_fallback=prev_h, pdl_fallback=prev_l)
 
+        # Pre-resample sub_1y to Weekly once for both Section 3 and Section 4 (huge speed gain)
+        df_w = None
+        if not sub_1y.empty and len(sub_1y) >= 15:
+            try:
+                df_w = sub_1y.resample("W-FRI").agg({
+                    "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+                }).dropna(subset=["Close"])
+            except Exception:
+                df_w = None
+
         # Section 2: Volume & F&O Derivatives Validations
         vol_deriv = calculate_volume_and_derivatives_v2(sub_1y, curr_day_vol=day_vol, ltp=ltp, prev_close=prev_close)
 
         # Section 3: Weekly Pivot & Money Zone Matrix
-        weekly_mz = calculate_weekly_money_zone_v2(sub_1y, ltp=ltp)
+        weekly_mz = calculate_weekly_money_zone_v2(sub_1y, ltp=ltp, df_w=df_w)
 
         # Section 4 & Part II: Advanced Fibonacci & High Beta Confluence (Fibonacci_Screener_V2)
         fib_v2 = calculate_fibonacci_v2_enhancements(
@@ -749,7 +830,9 @@ def fetch_universe_data_v2(
             curr_candles=curr_candles,
             ltp=ltp,
             vp=vp,
-            is_opt_c_breakin=mtf_info.get("opt_c_breakin", False)
+            is_opt_c_breakin=mtf_info.get("opt_c_breakin", False),
+            df_w=df_w,
+            df_15m=mtf_info.get("df_15m_all")
         )
 
         # 52W Proximity
@@ -886,12 +969,19 @@ def fetch_universe_data_v2(
         })
 
     if not records:
-        return pd.DataFrame(), {}
+        return pd.DataFrame(), {
+            "live_date": live_date_str,
+            "total_scanned": 0,
+            "intraday_cache": intraday_cache,
+            "daily_cache": daily_cache
+        }
 
     df_out = pd.DataFrame(records)
     meta = {
         "live_date": live_date_str,
-        "total_scanned": len(df_out)
+        "total_scanned": len(df_out),
+        "intraday_cache": intraday_cache,
+        "daily_cache": daily_cache
     }
     return df_out, meta
 
