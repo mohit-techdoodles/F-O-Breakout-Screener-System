@@ -12,12 +12,14 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple, Any
 from zoneinfo import ZoneInfo
 import numpy as np
+import importlib
 import pandas as pd
 import yfinance as yf
 
+import fibonacci_screener_v2
+importlib.reload(fibonacci_screener_v2)
 from fo_stocks import get_yf_symbol, sanitize_symbol
 from volume_profile import calculate_volume_profile
-from fibonacci_screener_v2 import calculate_fibonacci_v2_enhancements
 
 
 # =====================================================================
@@ -439,7 +441,8 @@ def calculate_volume_and_derivatives_v2(
 def calculate_weekly_money_zone_v2(
     daily_df: pd.DataFrame, 
     ltp: float,
-    df_w: Optional[pd.DataFrame] = None
+    df_w: Optional[pd.DataFrame] = None,
+    **kwargs
 ) -> Dict[str, Any]:
     """
     Section 3: Weekly Pivot & Money Zone Matrix
@@ -823,17 +826,28 @@ def fetch_universe_data_v2(
         weekly_mz = calculate_weekly_money_zone_v2(sub_1y, ltp=ltp, df_w=df_w)
 
         # Section 4 & Part II: Advanced Fibonacci & High Beta Confluence (Fibonacci_Screener_V2)
-        fib_v2 = calculate_fibonacci_v2_enhancements(
-            sub_intra=sub_intra,
-            sub_1y=sub_1y,
-            prev_candles=prev_candles,
-            curr_candles=curr_candles,
-            ltp=ltp,
-            vp=vp,
-            is_opt_c_breakin=mtf_info.get("opt_c_breakin", False),
-            df_w=df_w,
-            df_15m=mtf_info.get("df_15m_all")
-        )
+        try:
+            fib_v2 = fibonacci_screener_v2.calculate_fibonacci_v2_enhancements(
+                sub_intra=sub_intra,
+                sub_1y=sub_1y,
+                prev_candles=prev_candles,
+                curr_candles=curr_candles,
+                ltp=ltp,
+                vp=vp,
+                is_opt_c_breakin=mtf_info.get("opt_c_breakin", False),
+                df_w=df_w,
+                df_15m=mtf_info.get("df_15m_all")
+            )
+        except TypeError:
+            fib_v2 = fibonacci_screener_v2.calculate_fibonacci_v2_enhancements(
+                sub_intra=sub_intra,
+                sub_1y=sub_1y,
+                prev_candles=prev_candles,
+                curr_candles=curr_candles,
+                ltp=ltp,
+                vp=vp,
+                is_opt_c_breakin=mtf_info.get("opt_c_breakin", False)
+            )
 
         # 52W Proximity
         dist_52w_high_pct = ((ltp - h52) / h52 * 100.0) if h52 > 0 else -100.0

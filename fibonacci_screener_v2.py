@@ -516,7 +516,8 @@ def calculate_macro_anchor(
     ltp: float,
     macro_confluence_pct: float = 0.015,
     df_w: Optional[pd.DataFrame] = None,
-    df_m: Optional[pd.DataFrame] = None
+    df_m: Optional[pd.DataFrame] = None,
+    **kwargs
 ) -> Tuple[bool, bool, float, str]:
     """
     Point 8: Swing: The Macro Anchor (Monthly Value + Weekly Fib)
@@ -629,7 +630,8 @@ def calculate_macro_anchor(
 def calculate_weekly_cpr_fib_expansion(
     df_daily: pd.DataFrame,
     ltp: float,
-    df_w: Optional[pd.DataFrame] = None
+    df_w: Optional[pd.DataFrame] = None,
+    **kwargs
 ) -> Tuple[bool, bool, bool, float, float]:
     """
     Point 9: Swing: Weekly CPR Squeeze & Fib Expansion
@@ -694,7 +696,8 @@ def calculate_weekly_cpr_fib_expansion(
 def calculate_inside_week_gp_compression(
     df_daily: pd.DataFrame,
     macro_fib_0618: float,
-    df_w: Optional[pd.DataFrame] = None
+    df_w: Optional[pd.DataFrame] = None,
+    **kwargs
 ) -> Tuple[bool, bool, str]:
     """
     Point 10: Swing: Inside Week + Golden Pocket Compression
@@ -769,12 +772,19 @@ def calculate_fibonacci_v2_enhancements(
     config: Optional[Dict[str, Any]] = None,
     df_w: Optional[pd.DataFrame] = None,
     df_m: Optional[pd.DataFrame] = None,
-    df_15m: Optional[pd.DataFrame] = None
+    df_15m: Optional[pd.DataFrame] = None,
+    **kwargs
 ) -> Dict[str, Any]:
     """
     Master pipeline evaluating all 10 Fibonacci & High Beta F&O Confluence enhancements.
     Returns dictionary with all metrics and boolean flags.
     """
+    if df_w is None:
+        df_w = kwargs.get("df_w")
+    if df_m is None:
+        df_m = kwargs.get("df_m")
+    if df_15m is None:
+        df_15m = kwargs.get("df_15m")
     cfg = config or {}
     cluster_tol = cfg.get("cluster_tolerance_pct", 0.005)
     vol_tol = cfg.get("vol_confluence_tolerance", 0.005)
