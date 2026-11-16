@@ -240,6 +240,29 @@ money_zone_filter = st.sidebar.selectbox(
     help="Section 3: Forward-looking Friday-for-Monday setup matrix."
 )
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("4. Advanced Fibonacci & Confluence")
+
+fib_confluence_filter = st.sidebar.selectbox(
+    "Fibonacci Confluence Filter",
+    [
+        "All",
+        "Any Advanced Fibonacci Confluence Setup",
+        "1. MTF Fibonacci Cluster Active",
+        "2. Fibonacci Extension Breakout (1.272 / 1.618)",
+        "3. Volume Profile + Golden Pocket Confluence",
+        "4. Fibonacci Rejection (Wick) Scanner (>= 60%)",
+        "5. Golden Pivot Confluence (Fib + S1/S2/R1/R2 + Value Area)",
+        "6. Camarilla Reversal Trap (L3/H3 Trap)",
+        "7. Institutional Premium/Discount Oscillator (Extreme)",
+        "8. Macro Anchor (Monthly Value + Weekly Fib)",
+        "9. Weekly CPR Squeeze & Fib Expansion",
+        "10. Inside Week + Golden Pocket Compression"
+    ],
+    index=0,
+    help="Developer Documentation: Advanced Fibonacci & Target Enhancements (Points 1 - 10)."
+)
+
 # Cache data loading
 @st.cache_data(ttl=90, show_spinner=False)
 def get_v2_data(syms, tf):
@@ -267,7 +290,8 @@ all_df, bull_df, bear_df, stats = apply_screener_v2_filters(
     oi_buildup_filter=oi_filter,
     pcr_squeeze_filter=pcr_filter,
     money_zone_setup_filter=money_zone_filter,
-    mtf_confluence_filter=mtf_confluence
+    mtf_confluence_filter=mtf_confluence,
+    fib_confluence_filter=fib_confluence_filter
 )
 
 # ----------------- Top Metric Cards Row -----------------
@@ -320,11 +344,57 @@ with m6:
     </div>
     """, unsafe_allow_html=True)
 
+# ----------------- Fibonacci & Confluence KPI Row -----------------
+f1, f2, f3, f4, f5, f6 = st.columns(6)
+with f1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">MTF Fib Clusters</div>
+        <div class="metric-val" style="color: #FFD54F;">{stats.get('fib_clusters_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with f2:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">VP + Golden Pocket</div>
+        <div class="metric-val" style="color: #FFB300;">{stats.get('vol_fib_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with f3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">15m Wick Rejection</div>
+        <div class="metric-val" style="color: #26A69A;">{stats.get('fib_rejection_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with f4:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">Golden Pivots</div>
+        <div class="metric-val" style="color: #66BB6A;">{stats.get('golden_pivot_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with f5:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">Camarilla Traps</div>
+        <div class="metric-val" style="color: #FF7043;">{stats.get('camarilla_trap_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with f6:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">Weekly CPR & Fib Exp</div>
+        <div class="metric-val" style="color: #AB47BC;">{stats.get('weekly_cpr_fib_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 # ----------------- Main View Tabs -----------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab_fib, tab4, tab5 = st.tabs([
     "🎯 Core MTF Breakouts",
     "📊 Volume & F&O Validations",
     "🔮 Weekly Money Zone Matrix",
+    "📐 Advanced Fibonacci & Confluence",
     "📈 Interactive Chart",
     "📜 Architecture Spec & Pine Script"
 ])
@@ -451,10 +521,114 @@ with tab3:
 
 
 # =====================================================================
+# TAB FIB: ADVANCED FIBONACCI & HIGH BETA CONFLUENCE (POINTS 1 - 10)
+# =====================================================================
+with tab_fib:
+    st.markdown("#### 📐 Advanced Fibonacci Retracement & High Beta F&O Confluence Engine")
+    st.caption("Module: `Fibonacci_Screener_V2` | Implements Multi-Timeframe (MTF) clustering, Blue Sky extensions, Volume Profile confluence, and institutional price action.")
+
+    f_sub1, f_sub2, f_sub3 = st.tabs([
+        "Part I: Advanced Fibonacci (Points 1-4)",
+        "Part II: High Beta F&O Confluences (Points 5-10)",
+        "Full Fibonacci Screener Monitor & CSV Export"
+    ])
+
+    with f_sub1:
+        st.markdown("##### Part I: MTF Clusters, Extension Breakouts, VP Confluence & Wick Rejections")
+        p1_cols = [
+            "Symbol", "LTP", "Chg%", "Swing_Type_1H", "Fib_0618_1H",
+            "Is_Cluster_Active", "Cluster_Level_Price", "Cluster_Labels",
+            "Is_Ext_Breakout", "Ext_Target_1", "Ext_Target_2", "Dist_To_Ext_1%", "Ext_Setup_Tag",
+            "Vol_Fib_Confluence_Flag", "Confluence_Node_Type", "Confluence_Node_Price",
+            "Is_Fib_Rejection", "Rejection_Level", "Rejection_Wick%", "Rejection_Tag"
+        ]
+        available_p1_cols = [c for c in p1_cols if c in all_df.columns]
+        p1_df = all_df[available_p1_cols].copy()
+
+        # Quick Highlights
+        cl_active_df = p1_df[p1_df.get("Is_Cluster_Active", False) == True]
+        ext_active_df = p1_df[p1_df.get("Is_Ext_Breakout", False) == True]
+        vp_gp_active_df = p1_df[p1_df.get("Vol_Fib_Confluence_Flag", False) == True]
+        wick_active_df = p1_df[p1_df.get("Is_Fib_Rejection", False) == True]
+
+        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+        col_h1.metric("Active MTF Clusters", len(cl_active_df))
+        col_h2.metric("Extension Breakouts", len(ext_active_df))
+        col_h3.metric("VP + Golden Pocket", len(vp_gp_active_df))
+        col_h4.metric("15m Wick Rejections", len(wick_active_df))
+
+        st.dataframe(p1_df, use_container_width=True)
+
+    with f_sub2:
+        st.markdown("##### Part II: Golden Pivots, Camarilla Traps, Prem/Disc Oscillator & Macro Swings")
+        p2_cols = [
+            "Symbol", "LTP", "Chg%",
+            "Is_Golden_Pivot_Bullish", "Is_Golden_Pivot_Bearish", "Golden_Pivot_Zone",
+            "Is_Camarilla_Trap_Bull", "Is_Camarilla_Trap_Bear", "Camarilla_Trap_Level", "Camarilla_Trap_Tag",
+            "Prem_Disc_Status", "Dist_From_POC_ATR",
+            "Is_Macro_Anchor_Bull", "Is_Macro_Anchor_Bear", "Macro_Anchor_Zone", "Macro_Anchor_Tag",
+            "Weekly_CPR_Squeeze_Active", "Weekly_Fib_Exp_Bull", "Weekly_Fib_Exp_Bear", "Weekly_Fib_Target_1", "Weekly_Fib_Target_2",
+            "Is_Inside_Week_GP_Bull", "Is_Inside_Week_GP_Bear", "Inside_Week_GP_Status"
+        ]
+        available_p2_cols = [c for c in p2_cols if c in all_df.columns]
+        p2_df = all_df[available_p2_cols].copy()
+
+        col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+        col_k1.metric("Golden Pivots", int((all_df.get("Is_Golden_Pivot_Bullish", False) | all_df.get("Is_Golden_Pivot_Bearish", False)).sum()))
+        col_k2.metric("Camarilla Traps", int((all_df.get("Is_Camarilla_Trap_Bull", False) | all_df.get("Is_Camarilla_Trap_Bear", False)).sum()))
+        col_k3.metric("Macro Anchor Swings", int((all_df.get("Is_Macro_Anchor_Bull", False) | all_df.get("Is_Macro_Anchor_Bear", False)).sum()))
+        col_k4.metric("Inside Week @ 0.618", int((all_df.get("Is_Inside_Week_GP_Bull", False) | all_df.get("Is_Inside_Week_GP_Bear", False)).sum()))
+
+        st.dataframe(p2_df, use_container_width=True)
+
+    with f_sub3:
+        st.markdown("##### Full Universe Advanced Fibonacci Monitor")
+        sym_search = st.text_input("🔍 Search Symbol in Fibonacci Screener", "").strip().upper()
+        display_fib_df = all_df
+        if sym_search:
+            display_fib_df = display_fib_df[display_fib_df["Symbol"].str.contains(sym_search)]
+
+        st.dataframe(display_fib_df, use_container_width=True)
+
+        csv_fib = display_fib_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Fibonacci Screener V2.0 Data (CSV)",
+            data=csv_fib,
+            file_name=f"Fibonacci_Screener_V2_{base_meta.get('live_date', 'today')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    # Documentation & Formula Guide
+    with st.expander("📖 Developer Documentation: Advanced Fibonacci & Target Specifications Guide"):
+        st.markdown("""
+        ### Part I: Advanced Fibonacci & Target Enhancements
+        1. **Fibonacci Cluster (MTF Confluence) Filter:**
+           - Detects institutional support/resistance where 1-Hour Macro and 15-Minute Micro Fibonacci levels align within `±0.5%`.
+           - `ABS(1H_Fib_Value - 15m_Fib_Value) <= CONFLUENCE_TOLERANCE_PCT`.
+        2. **Fibonacci Extension Breakouts (1.272 & 1.618):**
+           - Targets for Blue Sky setups breaking out beyond 1.0 (Swing High) with Volume confirmation.
+           - `Ext 1 = Swing_Low + (Range × 1.272)`, `Ext 2 = Swing_Low + (Range × 1.618)`.
+        3. **Volume Profile + Golden Pocket Confluence:**
+           - Flags 0.618 Golden Pocket alignment with Volume Profile Point of Control (POC) or Top 3 High Volume Nodes (HVNs) within `±0.5%`.
+        4. **Fibonacci Rejection (Wick) Scanner:**
+           - 15-minute candlestick anatomy checking for institutional buying/selling pressure at 0.500 or 0.618 with lower/upper wick $\ge 60\%$ of total range.
+
+        ### Part II: High Beta F&O Confluence Filters
+        5. **The 'Golden Pivot' Confluence:** 1H Fib 0.618/0.500 within `±0.5%` of Daily Pivot S1/S2 AND within `±0.5%` of VAL/POC.
+        6. **High Beta Camarilla Reversal Trap:** Camarilla L3 overlaps with 1H Fib 0.618; 15m candle breaches L3 then closes back inside Money Zone.
+        7. **Institutional Premium/Discount Oscillator:** Measures distance from POC $> 2 \times ATR_{14}$ combined with S3/R3 and Fib -0.618 / 1.618 extensions.
+        8. **The Macro Anchor (Monthly Value + Weekly Fib):** 3-15 day swing hold when Weekly Fib aligns with MPOC and Monthly Pivots with Daily candlestick confirmation.
+        9. **Weekly CPR Squeeze & Fib Expansion:** Volatility compression (Weekly CPR $< 0.5\%$) projecting targets +1.272 / +1.618 or -0.272 / -0.618.
+        10. **Inside Week + Golden Pocket Compression:** Inside Week compression with Close within $\pm 1\%$ of Fib 0.618 and Weekly POC in the bottom 30% (Accumulation) or top 30% (Distribution).
+        """)
+
+
+# =====================================================================
 # TAB 4: INTERACTIVE TECHNICAL CHART
 # =====================================================================
 with tab4:
-    st.markdown("#### 4. Multi-Timeframe Interactive Technical Chart")
+    st.markdown("#### 5. Multi-Timeframe Interactive Technical Chart & Fibonacci Overlay")
     chart_sym = st.selectbox("Select Symbol for Deep Dive", options=selected_symbols, index=0)
 
     try:
@@ -504,6 +678,21 @@ with tab4:
                 if not np.isnan(chart_mtf["ib_close"]):
                     fig.add_hline(y=chart_mtf["ib_close"], line=dict(color="#FFD54F", dash="dashdot"), annotation_text="10:15 1H Close", row=1, col=1)
 
+                # Fibonacci & Target Extensions Overlay
+                stock_lookup = all_df[all_df["Symbol"] == chart_sym]
+                if not stock_lookup.empty:
+                    s_row = stock_lookup.iloc[0]
+                    f_618 = s_row.get("Fib_0618_1H", np.nan)
+                    e_t1 = s_row.get("Ext_Target_1", np.nan)
+                    e_t2 = s_row.get("Ext_Target_2", np.nan)
+
+                    if not np.isnan(f_618) and f_618 > 0:
+                        fig.add_hline(y=f_618, line=dict(color="#FFD54F", width=1.5, dash="dash"), annotation_text=f"Fib 0.618 (₹{f_618:.2f})", row=1, col=1)
+                    if not np.isnan(e_t1) and e_t1 > 0:
+                        fig.add_hline(y=e_t1, line=dict(color="#00E5FF", width=1.5, dash="dot"), annotation_text=f"Ext T1 1.272 (₹{e_t1:.2f})", row=1, col=1)
+                    if not np.isnan(e_t2) and e_t2 > 0:
+                        fig.add_hline(y=e_t2, line=dict(color="#00E676", width=1.5, dash="dot"), annotation_text=f"Ext T2 1.618 (₹{e_t2:.2f})", row=1, col=1)
+
                 # Volume Bar
                 fig.add_trace(go.Bar(
                     x=c_today.index,
@@ -520,6 +709,20 @@ with tab4:
                     xaxis_rangeslider_visible=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+                if not stock_lookup.empty:
+                    s_row = stock_lookup.iloc[0]
+                    st.markdown(f"""
+                    <div style="background: rgba(255, 213, 79, 0.08); border: 1px solid #FFD54F; border-radius: 6px; padding: 10px 14px; margin-top: 10px;">
+                        <span style="font-weight: 700; color: #FFD54F;">📐 Fibonacci Retracement & Confluence ({s_row.get('Swing_Type_1H', 'Neutral')}):</span> &nbsp;
+                        <b>1H Swing:</b> ₹{s_row.get('Swing_Low_1H')} - ₹{s_row.get('Swing_High_1H')} &nbsp;|&nbsp;
+                        <b>Golden Pocket (0.618):</b> ₹{s_row.get('Fib_0618_1H')} &nbsp;|&nbsp;
+                        <span style="color: #00E5FF; font-weight: 700;">Ext Target 1 (1.272):</span> ₹{s_row.get('Ext_Target_1')} &nbsp;|&nbsp;
+                        <span style="color: #00E676; font-weight: 700;">Ext Target 2 (1.618):</span> ₹{s_row.get('Ext_Target_2')} &nbsp;|&nbsp;
+                        <b>Cluster:</b> {s_row.get('Cluster_Labels', 'None')} &nbsp;|&nbsp;
+                        <b>VP Confluence:</b> {s_row.get('Confluence_Node_Type', 'None')}
+                    </div>
+                    """, unsafe_allow_html=True)
             else:
                 st.info("Waiting for intraday session candles to populate.")
         else:
@@ -534,7 +737,7 @@ with tab4:
 with tab5:
     st.markdown("#### 📜 Screener Architecture V2.0 Specifications & Pine Script v5")
     st.markdown("""
-    This system implements the exact specifications from **Screener Architecture V2.0 (November 2026)**:
+    This system implements the exact specifications from **Screener Architecture V2.0 (November 2026)** and **Advanced Fibonacci & Target Enhancements**:
     - **1. Core MTF Strategy:**
       - Daily (1D): PDH / PDL shifted by 1 period.
       - Hourly (1H): Initial Balance locked at 10:15 AM IST (Captures 1H High, Low, and Close).
@@ -552,11 +755,10 @@ with tab5:
     - **3. Weekly Pivot & Money Zone Matrix:**
       - Standard CPR: $Pivot = (H+L+C)/3, BC = (H+L)/2, TC = (Pivot-BC)+Pivot$.
       - Camarilla H4/L4: $Range = H-L, H4 = C + (Range \times 1.1 / 2)$.
-      - Forward-looking Friday-for-Monday setups:
-        1. Volatility Squeeze (Next Week Inside Value)
-        2. Narrow CPR ($< 0.5\%$)
-        3. Trend Continuation (Higher CPR & POC)
-        4. Camarilla Alignment ($H4 \approx VAH \pm 0.2\%$)
+      - Forward-looking Friday-for-Monday setups: Volatility Squeeze, Narrow CPR ($< 0.5\%$), Trend Continuation, Camarilla Alignment.
+    - **4. Advanced Fibonacci & High Beta F&O Confluences (Module: Fibonacci_Screener_V2):**
+      - MTF Clusters (1H & 15m), Extension Breakouts (1.272 & 1.618), Volume Profile + Golden Pocket Confluence, 15m Wick Rejection Scanner ($\ge 60\%$).
+      - Golden Pivots (Fib + Pivots + Value Area), Camarilla Reversal Traps (L3/H3), Prem/Disc Oscillator, Macro Anchor (Monthly + Weekly), Weekly CPR Squeeze & Fib Expansion, Inside Week + 0.618 Compression.
     """)
 
     st.subheader("TradingView Pine Script (v5) Code")

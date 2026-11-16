@@ -16,6 +16,7 @@ import yfinance as yf
 
 from fo_stocks import get_yf_symbol, sanitize_symbol
 from volume_profile import calculate_volume_profile
+from fibonacci_screener_v2 import calculate_fibonacci_v2_enhancements
 
 
 # =====================================================================
@@ -740,6 +741,16 @@ def fetch_universe_data_v2(
         # Section 3: Weekly Pivot & Money Zone Matrix
         weekly_mz = calculate_weekly_money_zone_v2(sub_1y, ltp=ltp)
 
+        # Section 4 & Part II: Advanced Fibonacci & High Beta Confluence (Fibonacci_Screener_V2)
+        fib_v2 = calculate_fibonacci_v2_enhancements(
+            sub_intra=sub_intra,
+            sub_1y=sub_1y,
+            prev_candles=prev_candles,
+            curr_candles=curr_candles,
+            ltp=ltp,
+            vp=vp
+        )
+
         # 52W Proximity
         dist_52w_high_pct = ((ltp - h52) / h52 * 100.0) if h52 > 0 else -100.0
         dist_52w_low_pct = ((ltp - l52) / l52 * 100.0) if l52 > 0 else 100.0
@@ -820,7 +831,51 @@ def fetch_universe_data_v2(
             "Setup_Cam_Align": weekly_mz["setup_camarilla_alignment"],
             "Cam_VAH_Diff%": weekly_mz["cam_vah_diff_pct"],
             "Watchlist_Setups": ", ".join(weekly_mz["watchlist_setups"]) if weekly_mz["watchlist_setups"] else "None",
-            "Has_Forward_Setup": len(weekly_mz["watchlist_setups"]) > 0
+            "Has_Forward_Setup": len(weekly_mz["watchlist_setups"]) > 0,
+            # Section 4 & Part II: Fibonacci & High Beta Confluence (Fibonacci_Screener_V2)
+            "Is_Cluster_Active": fib_v2["is_cluster_active"],
+            "Cluster_Level_Price": fib_v2["cluster_level_price"],
+            "Cluster_Labels": fib_v2["cluster_labels"],
+            "Is_Ext_Breakout": fib_v2["is_ext_breakout"],
+            "Ext_Target_1": fib_v2["ext_target_1"],
+            "Ext_Target_2": fib_v2["ext_target_2"],
+            "Dist_To_Ext_1%": fib_v2["dist_to_ext_1_pct"],
+            "Ext_Setup_Tag": fib_v2["ext_setup_tag"],
+            "Vol_Fib_Confluence_Flag": fib_v2["vol_fib_confluence_flag"],
+            "Confluence_Node_Type": fib_v2["confluence_node_type"],
+            "Confluence_Node_Price": fib_v2["confluence_node_price"],
+            "Is_Fib_Rejection": fib_v2["is_fib_rejection"],
+            "Rejection_Level": fib_v2["rejection_level"],
+            "Rejection_Wick%": fib_v2["rejection_wick_pct"],
+            "Rejection_Tag": fib_v2["rejection_tag"],
+            "Is_Golden_Pivot_Bullish": fib_v2["is_golden_pivot_bullish"],
+            "Is_Golden_Pivot_Bearish": fib_v2["is_golden_pivot_bearish"],
+            "Golden_Pivot_Zone": fib_v2["golden_pivot_zone"],
+            "Is_Camarilla_Trap_Bull": fib_v2["is_camarilla_trap_bull"],
+            "Is_Camarilla_Trap_Bear": fib_v2["is_camarilla_trap_bear"],
+            "Camarilla_Trap_Level": fib_v2["camarilla_trap_level"],
+            "Camarilla_Trap_Tag": fib_v2["camarilla_trap_tag"],
+            "Is_Prem_Disc_Oversold": fib_v2["is_prem_disc_oversold"],
+            "Is_Prem_Disc_Overbought": fib_v2["is_prem_disc_overbought"],
+            "Prem_Disc_Status": fib_v2["prem_disc_status"],
+            "Dist_From_POC_ATR": fib_v2["dist_from_poc_atr"],
+            "Is_Macro_Anchor_Bull": fib_v2["is_macro_anchor_bull"],
+            "Is_Macro_Anchor_Bear": fib_v2["is_macro_anchor_bear"],
+            "Macro_Anchor_Zone": fib_v2["macro_anchor_zone"],
+            "Macro_Anchor_Tag": fib_v2["macro_anchor_tag"],
+            "Weekly_CPR_Squeeze_Active": fib_v2["weekly_cpr_squeeze_active"],
+            "Weekly_Fib_Exp_Bull": fib_v2["weekly_fib_exp_bull"],
+            "Weekly_Fib_Exp_Bear": fib_v2["weekly_fib_exp_bear"],
+            "Weekly_Fib_Target_1": fib_v2["weekly_fib_target_1"],
+            "Weekly_Fib_Target_2": fib_v2["weekly_fib_target_2"],
+            "Is_Inside_Week_GP_Bull": fib_v2["is_inside_week_gp_bull"],
+            "Is_Inside_Week_GP_Bear": fib_v2["is_inside_week_gp_bear"],
+            "Inside_Week_GP_Status": fib_v2["inside_week_gp_status"],
+            "Swing_High_1H": fib_v2["swing_high_1h"],
+            "Swing_Low_1H": fib_v2["swing_low_1h"],
+            "Swing_Type_1H": fib_v2["swing_type_1h"],
+            "Fib_0618_1H": fib_v2["fib_0618_1h"],
+            "Fib_0500_1H": fib_v2["fib_0500_1h"]
         })
 
     if not records:
@@ -843,7 +898,8 @@ def apply_screener_v2_filters(
     oi_buildup_filter: str = "All",
     pcr_squeeze_filter: str = "All",
     money_zone_setup_filter: str = "All",
-    mtf_confluence_filter: str = "All"
+    mtf_confluence_filter: str = "All",
+    fib_confluence_filter: str = "All"
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """
     Applies in-memory vectorized filtering for Screener Architecture V2.0.
@@ -939,6 +995,48 @@ def apply_screener_v2_filters(
     else:
         cond_mz = pd.Series(True, index=filtered.index)
 
+    # 6. Section 4 & Part II: Advanced Fibonacci & High Beta Confluence Filter
+    if fib_confluence_filter == "1. MTF Fibonacci Cluster Active":
+        cond_fib = filtered["Is_Cluster_Active"]
+    elif fib_confluence_filter == "2. Fibonacci Extension Breakout (1.272 / 1.618)":
+        cond_fib = filtered["Is_Ext_Breakout"]
+    elif fib_confluence_filter == "3. Volume Profile + Golden Pocket Confluence":
+        cond_fib = filtered["Vol_Fib_Confluence_Flag"]
+    elif fib_confluence_filter == "4. Fibonacci Rejection (Wick) Scanner (>= 60%)":
+        cond_fib = filtered["Is_Fib_Rejection"]
+    elif fib_confluence_filter == "5. Golden Pivot Confluence (Fib + S1/S2/R1/R2 + Value Area)":
+        cond_fib = filtered["Is_Golden_Pivot_Bullish"] | filtered["Is_Golden_Pivot_Bearish"]
+    elif fib_confluence_filter == "6. Camarilla Reversal Trap (L3/H3 Trap)":
+        cond_fib = filtered["Is_Camarilla_Trap_Bull"] | filtered["Is_Camarilla_Trap_Bear"]
+    elif fib_confluence_filter == "7. Institutional Premium/Discount Oscillator (Extreme)":
+        cond_fib = filtered["Is_Prem_Disc_Oversold"] | filtered["Is_Prem_Disc_Overbought"]
+    elif fib_confluence_filter == "8. Macro Anchor (Monthly Value + Weekly Fib)":
+        cond_fib = filtered["Is_Macro_Anchor_Bull"] | filtered["Is_Macro_Anchor_Bear"]
+    elif fib_confluence_filter == "9. Weekly CPR Squeeze & Fib Expansion":
+        cond_fib = filtered["Weekly_CPR_Squeeze_Active"]
+    elif fib_confluence_filter == "10. Inside Week + Golden Pocket Compression":
+        cond_fib = filtered["Is_Inside_Week_GP_Bull"] | filtered["Is_Inside_Week_GP_Bear"]
+    elif fib_confluence_filter == "Any Advanced Fibonacci Confluence Setup":
+        cond_fib = (
+            filtered["Is_Cluster_Active"] |
+            filtered["Is_Ext_Breakout"] |
+            filtered["Vol_Fib_Confluence_Flag"] |
+            filtered["Is_Fib_Rejection"] |
+            filtered["Is_Golden_Pivot_Bullish"] |
+            filtered["Is_Golden_Pivot_Bearish"] |
+            filtered["Is_Camarilla_Trap_Bull"] |
+            filtered["Is_Camarilla_Trap_Bear"] |
+            filtered["Is_Prem_Disc_Oversold"] |
+            filtered["Is_Prem_Disc_Overbought"] |
+            filtered["Is_Macro_Anchor_Bull"] |
+            filtered["Is_Macro_Anchor_Bear"] |
+            filtered["Weekly_CPR_Squeeze_Active"] |
+            filtered["Is_Inside_Week_GP_Bull"] |
+            filtered["Is_Inside_Week_GP_Bear"]
+        )
+    else:
+        cond_fib = pd.Series(True, index=filtered.index)
+
     # Base Value Area conditions
     cond_bull_vah = filtered["LTP"] > filtered["PD_VAH"]
     cond_bear_val = filtered["LTP"] < filtered["PD_VAL"]
@@ -946,15 +1044,15 @@ def apply_screener_v2_filters(
     # Combine Bullish & Bearish signals
     filtered["Bullish_Breakout"] = (
         cond_bull_vah & cond_bull_52w & cond_mtf_bull & cond_h1_bull & 
-        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz
+        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib
     )
     filtered["Bearish_Breakdown"] = (
         cond_bear_val & cond_bear_52w & cond_mtf_bear & cond_h1_bear & 
-        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz
+        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib
     )
 
     # Global display filter (if user selected specific restrictive filters)
-    common_mask = cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz
+    common_mask = cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib
     if h1_option_filter != "All":
         common_mask = common_mask & (cond_h1_bull | cond_h1_bear)
     if mtf_confluence_filter != "All":
@@ -975,7 +1073,17 @@ def apply_screener_v2_filters(
         "forward_mz_count": int(df["Has_Forward_Setup"].sum()),
         "narrow_cpr_v2_count": int(df["Setup_Narrow_CPR"].sum()),
         "vol_squeeze_count": int(df["Setup_Vol_Squeeze"].sum()),
-        "cam_align_count": int(df["Setup_Cam_Align"].sum())
+        "cam_align_count": int(df["Setup_Cam_Align"].sum()),
+        "fib_clusters_count": int(df["Is_Cluster_Active"].sum()) if "Is_Cluster_Active" in df else 0,
+        "fib_ext_breakout_count": int(df["Is_Ext_Breakout"].sum()) if "Is_Ext_Breakout" in df else 0,
+        "vol_fib_count": int(df["Vol_Fib_Confluence_Flag"].sum()) if "Vol_Fib_Confluence_Flag" in df else 0,
+        "fib_rejection_count": int(df["Is_Fib_Rejection"].sum()) if "Is_Fib_Rejection" in df else 0,
+        "golden_pivot_count": int((df["Is_Golden_Pivot_Bullish"] | df["Is_Golden_Pivot_Bearish"]).sum()) if "Is_Golden_Pivot_Bullish" in df else 0,
+        "camarilla_trap_count": int((df["Is_Camarilla_Trap_Bull"] | df["Is_Camarilla_Trap_Bear"]).sum()) if "Is_Camarilla_Trap_Bull" in df else 0,
+        "prem_disc_count": int((df["Is_Prem_Disc_Oversold"] | df["Is_Prem_Disc_Overbought"]).sum()) if "Is_Prem_Disc_Oversold" in df else 0,
+        "macro_anchor_count": int((df["Is_Macro_Anchor_Bull"] | df["Is_Macro_Anchor_Bear"]).sum()) if "Is_Macro_Anchor_Bull" in df else 0,
+        "weekly_cpr_fib_count": int(df["Weekly_CPR_Squeeze_Active"].sum()) if "Weekly_CPR_Squeeze_Active" in df else 0,
+        "inside_week_gp_count": int((df["Is_Inside_Week_GP_Bull"] | df["Is_Inside_Week_GP_Bear"]).sum()) if "Is_Inside_Week_GP_Bull" in df else 0,
     }
 
     return all_filtered, bullish_df, bearish_df, meta_stats
