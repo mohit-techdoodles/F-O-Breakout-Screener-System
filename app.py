@@ -40,6 +40,7 @@ from screener_engine import (
 )
 from chart_utils import create_breakout_chart
 from mtf_breakout import PINE_SCRIPT_V5_CODE
+from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
 
 
 def get_width_kw(fn):
@@ -57,6 +58,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Inject PWA Progressive Web App headers & Manifest
+inject_pwa_headers()
 
 # Custom Styling
 st.markdown("""
@@ -97,6 +101,9 @@ try:
     st.sidebar.page_link("pages/1_Screener_V2.py", label="🚀 Launch Screener Architecture V2.0", icon="🎯")
 except Exception:
     st.sidebar.markdown("[🚀 **Launch Screener Architecture V2.0**](/Screener_V2)")
+
+# App Launcher & Mobile Install Helper
+render_app_launcher_sidebar()
 st.sidebar.markdown("---")
 
 # Universe Selection

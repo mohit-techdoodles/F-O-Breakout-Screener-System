@@ -32,6 +32,7 @@ from screener_v2_engine import (
     calculate_mtf_v2
 )
 from mtf_breakout import PINE_SCRIPT_V5_CODE
+from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
 
 # ----------------- Page Configuration -----------------
 st.set_page_config(
@@ -40,6 +41,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Inject PWA Progressive Web App headers & Manifest
+inject_pwa_headers()
 
 # ----------------- Custom Styling -----------------
 st.markdown("""
@@ -140,6 +144,9 @@ try:
     st.sidebar.page_link("app.py", label="🏛️ Go to Classic Screener V1", icon="🔙")
 except Exception:
     st.sidebar.markdown("[🏛️ **Go to Classic Screener V1**](/)")
+
+# App Launcher & Mobile Install Helper
+render_app_launcher_sidebar()
 st.sidebar.markdown("---")
 
 # Universe Selection

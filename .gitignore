@@ -12,5 +12,6 @@ __pycache__/
 .DS_Store
 
 # Streamlit config/cache
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 
