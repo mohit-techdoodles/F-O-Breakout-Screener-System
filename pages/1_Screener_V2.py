@@ -382,6 +382,20 @@ require_high_conviction = st.sidebar.checkbox(
     help="Master Confluence: Requires Coiled Spring + (Fibonacci or Money Zone level) + Directional RS Outperformance + Derivatives OI Buildup."
 )
 
+range_pos_choice = st.sidebar.selectbox(
+    "Intraday Range Position (Close >= 0.70 / 0.75)",
+    [
+        "All",
+        "Strong Close (>= 0.70 Range)",
+        "Elite Close (>= 0.75 Range)",
+        "Fut Strong Close (>= 0.70 Range)",
+        "Fut Elite Close (>= 0.75 Range)",
+        "Weak Close (<= 0.30 Range)"
+    ],
+    index=0,
+    help="Filters stocks closing at the upper extremes of the day's high-low range (Close - Low) / (High - Low) >= 0.70 or 0.75 for both Spot and Futures with NSE tick precision (.70, .75)."
+)
+
 # Two-tier optimized caching:
 # 1. Daily 1-year data cached for 2 hours (historical bars don't change intraday)
 # 2. Intraday 5-day data cached for 120 seconds
@@ -449,7 +463,8 @@ all_df, bull_df, bear_df, stats = apply_screener_v2_filters(
     rs_filter=rs_option,
     coiled_spring_filter="Coiled Spring (NR7 or BB Squeeze)" if require_coiled_spring else "All",
     oi_2d_filter=oi_2d_filter,
-    swing_high_conviction_filter="High-Conviction Swing Only" if require_high_conviction else "All"
+    swing_high_conviction_filter="High-Conviction Swing Only" if require_high_conviction else "All",
+    range_pos_filter=range_pos_choice
 )
 
 # ----------------- Top Metric Cards Row -----------------
@@ -638,12 +653,13 @@ with tab2:
             "📋 Table View Mode:",
             [
                 "🎯 Derivatives & OI Focus (Direct View)",
+                "🏷️ Spot vs Future Pricing Matrix (.70/.75 Decimals)",
                 "📜 Complete Matrix (Volume + Delivery + OI + PCR)",
                 "📈 Past Historical OI Trend (T-0 to T-5 Days)"
             ],
             index=0,
             horizontal=True,
-            help="Switch between focused Derivatives view (all OI columns immediately visible), Complete Matrix, or Multi-Day Past OI Tracker."
+            help="Switch between focused Derivatives view, Spot vs Future dual pricing (.70/.75 precision), Complete Matrix, or Multi-Day Past OI Tracker."
         )
 
     if tab2_view_mode == "🎯 Derivatives & OI Focus (Direct View)":
@@ -664,6 +680,49 @@ with tab2:
             }),
             use_container_width=True,
             height=450
+        )
+
+    elif tab2_view_mode == "🏷️ Spot vs Future Pricing Matrix (.70/.75 Decimals)":
+        st.caption("⚡ **Spot vs Future Dual Pricing:** Displays exact tick-aligned decimals (.70, .75, etc.) for Spot & Future Close, High, Low, and Range Position ratio ((Close - Low) / (High - Low)).")
+        pricing_cols = [
+            "Symbol", "Spot_Close", "Spot_High", "Spot_Low", "Spot_Range_Pos", "Spot_Range_Tag",
+            "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
+            "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
+        ]
+        available_pricing = [c for c in pricing_cols if c in all_df.columns]
+        pricing_df = all_df[available_pricing].copy() if not all_df.empty else pd.DataFrame(columns=available_pricing)
+
+        st.dataframe(
+            pricing_df.style.format({
+                "Spot_Close": "₹{:.2f}",
+                "Spot_High": "₹{:.2f}",
+                "Spot_Low": "₹{:.2f}",
+                "Spot_Range_Pos": "{:.2f}",
+                "Fut_Close": "₹{:.2f}",
+                "Fut_High": "₹{:.2f}",
+                "Fut_Low": "₹{:.2f}",
+                "Fut_Range_Pos": "{:.2f}",
+                "Fut_Basis": "₹{:+.2f}",
+                "Fut_Basis%": "{:+.2f}%"
+            }),
+            use_container_width=True,
+            height=450,
+            column_config={
+                "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                "Spot_Close": st.column_config.TextColumn("Spot Close", width="small"),
+                "Spot_High": st.column_config.TextColumn("Spot High", width="small"),
+                "Spot_Low": st.column_config.TextColumn("Spot Low", width="small"),
+                "Spot_Range_Pos": st.column_config.NumberColumn("Spot Range Pos", help="Ratio (Close - Low) / (High - Low). >= 0.70/0.75 indicates strong closing.", format="%.2f"),
+                "Spot_Range_Tag": st.column_config.TextColumn("Spot Location", width="medium"),
+                "Fut_Close": st.column_config.TextColumn("Fut Close", width="small"),
+                "Fut_High": st.column_config.TextColumn("Fut High", width="small"),
+                "Fut_Low": st.column_config.TextColumn("Fut Low", width="small"),
+                "Fut_Range_Pos": st.column_config.NumberColumn("Fut Range Pos", format="%.2f"),
+                "Fut_Range_Tag": st.column_config.TextColumn("Fut Location", width="medium"),
+                "Fut_Basis": st.column_config.TextColumn("Basis (₹)", width="small"),
+                "Fut_Basis%": st.column_config.TextColumn("Basis %", width="small"),
+                "Days_To_Expiry": st.column_config.NumberColumn("Days Expiry", width="small")
+            }
         )
 
     elif tab2_view_mode == "📈 Past Historical OI Trend (T-0 to T-5 Days)":
@@ -761,6 +820,34 @@ with tab2:
             💡 <b>Scroll & Navigation Tip:</b> Drag horizontally inside the table above using your mouse trackpad or the highlighted blue scrollbar at the bottom to view columns past <b>OI Change %</b> (including 2D OI Buildup, PCR, and PCR Condition). Alternatively, switch to <b>🎯 Derivatives & OI Focus</b> above for a zero-scroll direct view.
         </div>
         """, unsafe_allow_html=True)
+
+    with st.expander("🏷️ Spot vs Future Pricing Matrix (Intraday High, Low, Final Market Close & 0.70 / 0.75 Range Position)", expanded=False):
+        st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Tick-Aligned .70, .75 Precision & Day Range Ratio)")
+        st.caption("Displays exact 2-decimal tick-aligned prices (e.g. .70, .75) for BOTH Spot and Future, with Intraday High/Low, Final Market Close, Range Position ((Close - Low) / (High - Low)), and Basis.")
+        exp_pricing_cols = [
+            "Symbol", "Spot_Close", "Spot_High", "Spot_Low", "Spot_Range_Pos", "Spot_Range_Tag",
+            "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
+            "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
+        ]
+        available_exp = [c for c in exp_pricing_cols if c in all_df.columns]
+        exp_p_df = all_df[available_exp].copy() if not all_df.empty else pd.DataFrame(columns=available_exp)
+
+        st.dataframe(
+            exp_p_df.style.format({
+                "Spot_Close": "₹{:.2f}",
+                "Spot_High": "₹{:.2f}",
+                "Spot_Low": "₹{:.2f}",
+                "Spot_Range_Pos": "{:.2f}",
+                "Fut_Close": "₹{:.2f}",
+                "Fut_High": "₹{:.2f}",
+                "Fut_Low": "₹{:.2f}",
+                "Fut_Range_Pos": "{:.2f}",
+                "Fut_Basis": "₹{:+.2f}",
+                "Fut_Basis%": "{:+.2f}%"
+            }),
+            use_container_width=True,
+            height=380
+        )
 
 
 # =====================================================================

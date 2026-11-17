@@ -22,6 +22,7 @@ from bollinger_screener import calculate_bollinger_bands
 from quantitative_filters import get_quant_metrics_for_stock
 from mtf_breakout import calculate_mtf_breakout
 from fibonacci_engine import compute_dual_timeframe_fibonacci, calculate_fibonacci_levels
+from screener_v2_engine import round_nse_tick, calculate_spot_and_future_pricing
 
 
 def download_chunked(
@@ -315,19 +316,46 @@ def fetch_universe_data(
         next_cam_l3 = ltp - (next_cam_rng * 1.1 / 4.0)
         next_cam_l4 = ltp - (next_cam_rng * 1.1 / 2.0)
 
+        # Spot & Future Dual Pricing (Tick-aligned decimals .70, .75, etc.)
+        pricing = calculate_spot_and_future_pricing(
+            spot_ltp=ltp,
+            spot_high=day_high,
+            spot_low=day_low,
+            spot_close=ltp
+        )
+
         records.append({
             "Symbol": sym,
-            "LTP": round(ltp, 2),
+            "LTP": pricing["spot_close"],
             "Chg%": round(chg_pct, 2),
             "PD_VAH": vp["PD_VAH"],
             "PD_VAL": vp["PD_VAL"],
             "PD_POC": vp["PD_POC"],
-            "52W_High": round(h52, 2),
-            "52W_Low": round(l52, 2),
-            "Day_High": round(day_high, 2),
-            "Day_Low": round(day_low, 2),
+            "52W_High": round_nse_tick(h52),
+            "52W_Low": round_nse_tick(l52),
+            "Day_High": pricing["spot_high"],
+            "Day_Low": pricing["spot_low"],
             "Day_Volume": int(day_vol),
-            "Prev_Close": round(prev_close, 2),
+            "Prev_Close": round_nse_tick(prev_close),
+            # Spot & Future Dual Pricing (.70/.75 tick aligned)
+            "Spot_Close": pricing["spot_close"],
+            "Spot_High": pricing["spot_high"],
+            "Spot_Low": pricing["spot_low"],
+            "Spot_Range_Pos": pricing["spot_range_pos"],
+            "Spot_Range_Tag": pricing["spot_range_tag"],
+            "Is_Spot_Strong_70": pricing["is_spot_strong_close_70"],
+            "Is_Spot_Strong_75": pricing["is_spot_strong_close_75"],
+            "Fut_LTP": pricing["fut_close"],
+            "Fut_Close": pricing["fut_close"],
+            "Fut_High": pricing["fut_high"],
+            "Fut_Low": pricing["fut_low"],
+            "Fut_Range_Pos": pricing["fut_range_pos"],
+            "Fut_Range_Tag": pricing["fut_range_tag"],
+            "Is_Fut_Strong_70": pricing["is_fut_strong_close_70"],
+            "Is_Fut_Strong_75": pricing["is_fut_strong_close_75"],
+            "Fut_Basis": pricing["fut_basis_pts"],
+            "Fut_Basis%": pricing["fut_basis_pct"],
+            "Days_To_Expiry": pricing["days_to_expiry"],
             "PD_CPR_Top": round(pd_cpr_top, 2),
             "PD_CPR_Pivot": round(pd_pivot, 2),
             "PD_CPR_Bottom": round(pd_cpr_bottom, 2),

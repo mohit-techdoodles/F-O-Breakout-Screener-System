@@ -1239,6 +1239,34 @@ with tab5:
 with tab6:
     st.subheader(f"All Scanned F&O Stocks ({len(all_df)})")
     
+    with st.expander("🏷️ Spot vs Future Pricing Matrix (Intraday High, Low, Final Market Close & 0.70 / 0.75 Range Position)", expanded=False):
+        st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Tick-Aligned .70, .75 Precision & Day Range Ratio)")
+        st.caption("Displays exact 2-decimal tick-aligned prices (e.g. .70, .75) for BOTH Spot and Future, with Intraday High/Low, Final Market Close, Range Position ((Close - Low) / (High - Low)), and Basis.")
+        exp_pricing_cols = [
+            "Symbol", "Spot_Close", "Spot_High", "Spot_Low", "Spot_Range_Pos", "Spot_Range_Tag",
+            "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
+            "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
+        ]
+        available_exp = [c for c in exp_pricing_cols if c in all_df.columns]
+        exp_p_df = all_df[available_exp].copy() if not all_df.empty else pd.DataFrame(columns=available_exp)
+
+        st.dataframe(
+            exp_p_df.style.format({
+                "Spot_Close": "₹{:.2f}",
+                "Spot_High": "₹{:.2f}",
+                "Spot_Low": "₹{:.2f}",
+                "Spot_Range_Pos": "{:.2f}",
+                "Fut_Close": "₹{:.2f}",
+                "Fut_High": "₹{:.2f}",
+                "Fut_Low": "₹{:.2f}",
+                "Fut_Range_Pos": "{:.2f}",
+                "Fut_Basis": "₹{:+.2f}",
+                "Fut_Basis%": "{:+.2f}%"
+            }),
+            **get_width_kw(st.dataframe),
+            hide_index=True
+        )
+
     search_query = st.text_input("🔍 Filter by Stock Symbol", "").strip().upper()
     filter_df = all_df
     if search_query:

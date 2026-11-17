@@ -7,6 +7,7 @@ Technical Specifications based on Screener Architecture V2.0 (November 2026):
 3. Weekly Pivot & Money Zone Matrix (Forward-looking Friday-for-Monday setups: Volatility Squeeze, Narrow CPR < 0.5%, Trend Continuation, Camarilla Alignment)
 """
 
+import calendar
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple, Any
@@ -22,6 +23,92 @@ import swing_optimization_filters
 importlib.reload(swing_optimization_filters)
 from fo_stocks import get_yf_symbol, sanitize_symbol
 from volume_profile import calculate_volume_profile
+
+
+def round_nse_tick(price: float) -> float:
+    """Rounds price to nearest valid NSE tick size of 0.05 (e.g. .70 or .75)."""
+    if np.isnan(price):
+        return np.nan
+    return round(round(float(price) * 20.0) / 20.0, 2)
+
+
+def calculate_spot_and_future_pricing(
+    spot_ltp: float,
+    spot_high: float,
+    spot_low: float,
+    spot_close: Optional[float] = None,
+    r_rate: float = 0.065
+) -> Dict[str, Any]:
+    """
+    Computes exact 2-decimal NSE tick-aligned prices (.70, .75, etc.) for BOTH Spot and Future:
+    - Spot: Final Market Close, Intraday High, Intraday Low, and Range Position ratio (0.00 to 1.00)
+    - Future: Futures Final Market Close, Futures Intraday High, Futures Intraday Low, Range Position ratio, and Basis (₹ and %)
+    """
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.datetime.now(tz)
+    
+    # Calculate days to near-month expiry (last Thursday of current month)
+    year = now.year
+    month = now.month
+    last_day = calendar.monthrange(year, month)[1]
+    last_date = datetime.date(year, month, last_day)
+    offset = (last_date.weekday() - 3) % 7
+    expiry_date = last_date - datetime.timedelta(days=offset)
+    
+    # If today is past expiry, roll to next month
+    if now.date() > expiry_date:
+        next_month = month + 1 if month < 12 else 1
+        next_year = year if month < 12 else year + 1
+        last_day = calendar.monthrange(next_year, next_month)[1]
+        last_date = datetime.date(next_year, next_month, last_day)
+        offset = (last_date.weekday() - 3) % 7
+        expiry_date = last_date - datetime.timedelta(days=offset)
+        
+    days_to_expiry = max(1, (expiry_date - now.date()).days)
+    
+    # Spot tick rounding (.70, .75, etc.)
+    spot_c = round_nse_tick(spot_close if spot_close is not None else spot_ltp)
+    spot_h = round_nse_tick(max(spot_high, spot_c))
+    spot_l = round_nse_tick(min(spot_low, spot_c))
+    
+    # Intraday Range Location (0.00 to 1.00 - e.g. 0.70 or 0.75)
+    spot_range = max(0.05, spot_h - spot_l)
+    spot_range_pos = round(max(0.0, min(1.0, (spot_c - spot_l) / spot_range)), 2)
+    
+    # Standard Cost of Carry model for near-month NSE F&O
+    coc_factor = 1.0 + (r_rate * (days_to_expiry / 365.0))
+    fut_c = round_nse_tick(spot_c * coc_factor)
+    fut_h = round_nse_tick(spot_h * coc_factor)
+    fut_l = round_nse_tick(spot_l * coc_factor)
+    
+    fut_range = max(0.05, fut_h - fut_l)
+    fut_range_pos = round(max(0.0, min(1.0, (fut_c - fut_l) / fut_range)), 2)
+    
+    basis_pts = round_nse_tick(fut_c - spot_c)
+    basis_pct = round(((fut_c - spot_c) / spot_c) * 100.0, 2) if spot_c > 0 else 0.0
+
+    spot_range_tag = "🔥 Top 25% (>= 0.75)" if spot_range_pos >= 0.75 else ("🟢 Top 30% (>= 0.70)" if spot_range_pos >= 0.70 else ("🔴 Bottom 30% (<= 0.30)" if spot_range_pos <= 0.30 else "⚪ Neutral"))
+    fut_range_tag = "🔥 Top 25% (>= 0.75)" if fut_range_pos >= 0.75 else ("🟢 Top 30% (>= 0.70)" if fut_range_pos >= 0.70 else ("🔴 Bottom 30% (<= 0.30)" if fut_range_pos <= 0.30 else "⚪ Neutral"))
+    
+    return {
+        "spot_close": spot_c,
+        "spot_high": spot_h,
+        "spot_low": spot_l,
+        "spot_range_pos": spot_range_pos,
+        "spot_range_tag": spot_range_tag,
+        "is_spot_strong_close_70": bool(spot_range_pos >= 0.70),
+        "is_spot_strong_close_75": bool(spot_range_pos >= 0.75),
+        "fut_close": fut_c,
+        "fut_high": fut_h,
+        "fut_low": fut_l,
+        "fut_range_pos": fut_range_pos,
+        "fut_range_tag": fut_range_tag,
+        "is_fut_strong_close_70": bool(fut_range_pos >= 0.70),
+        "is_fut_strong_close_75": bool(fut_range_pos >= 0.75),
+        "fut_basis_pts": basis_pts,
+        "fut_basis_pct": basis_pct,
+        "days_to_expiry": days_to_expiry
+    }
 
 
 # =====================================================================
@@ -859,6 +946,14 @@ def fetch_universe_data_v2(
         prev_close = float(prev_candles[close_col].iloc[-1])
         chg_pct = ((ltp - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
 
+        # Spot & Future Dual Pricing (Tick-aligned decimals .70, .75, etc.)
+        pricing = calculate_spot_and_future_pricing(
+            spot_ltp=ltp,
+            spot_high=day_high,
+            spot_low=day_low,
+            spot_close=ltp
+        )
+
         # Store in-memory caches for instant zero-latency chart rendering
         intraday_cache[sym] = sub_intra
         if not sub_1y.empty:
@@ -939,14 +1034,33 @@ def fetch_universe_data_v2(
 
         records.append({
             "Symbol": sym,
-            "LTP": round(ltp, 2),
+            "LTP": pricing["spot_close"],
             "Chg%": round(chg_pct, 2),
-            "Day_High": round(day_high, 2),
-            "Day_Low": round(day_low, 2),
+            "Day_High": pricing["spot_high"],
+            "Day_Low": pricing["spot_low"],
             "Day_Volume": int(day_vol),
-            "Prev_Close": round(prev_close, 2),
-            "52W_High": round(h52, 2),
-            "52W_Low": round(l52, 2),
+            "Prev_Close": round_nse_tick(prev_close),
+            # Spot & Future Dual Pricing (Tick-aligned decimals .70, .75, etc.)
+            "Spot_Close": pricing["spot_close"],
+            "Spot_High": pricing["spot_high"],
+            "Spot_Low": pricing["spot_low"],
+            "Spot_Range_Pos": pricing["spot_range_pos"],
+            "Spot_Range_Tag": pricing["spot_range_tag"],
+            "Is_Spot_Strong_70": pricing["is_spot_strong_close_70"],
+            "Is_Spot_Strong_75": pricing["is_spot_strong_close_75"],
+            "Fut_LTP": pricing["fut_close"],
+            "Fut_Close": pricing["fut_close"],
+            "Fut_High": pricing["fut_high"],
+            "Fut_Low": pricing["fut_low"],
+            "Fut_Range_Pos": pricing["fut_range_pos"],
+            "Fut_Range_Tag": pricing["fut_range_tag"],
+            "Is_Fut_Strong_70": pricing["is_fut_strong_close_70"],
+            "Is_Fut_Strong_75": pricing["is_fut_strong_close_75"],
+            "Fut_Basis": pricing["fut_basis_pts"],
+            "Fut_Basis%": pricing["fut_basis_pct"],
+            "Days_To_Expiry": pricing["days_to_expiry"],
+            "52W_High": round_nse_tick(h52),
+            "52W_Low": round_nse_tick(l52),
             "Dist_52W_High%": round(dist_52w_high_pct, 2),
             "Dist_52W_Low%": round(dist_52w_low_pct, 2),
             # Volume Profile
@@ -1130,6 +1244,7 @@ def apply_screener_v2_filters(
     coiled_spring_filter: str = "All",
     oi_2d_filter: str = "All",
     swing_high_conviction_filter: str = "All",
+    range_pos_filter: str = "All",
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """
@@ -1320,6 +1435,20 @@ def apply_screener_v2_filters(
         cond_swing_bull = pd.Series(True, index=filtered.index)
         cond_swing_bear = pd.Series(True, index=filtered.index)
 
+    # 8. Section 6: Intraday Decimal Range Position Filter (Close in upper 0.70 / 0.75 of day)
+    if range_pos_filter == "Strong Close (>= 0.70 Range)":
+        cond_range = filtered["Is_Spot_Strong_70"] if "Is_Spot_Strong_70" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "Elite Close (>= 0.75 Range)":
+        cond_range = filtered["Is_Spot_Strong_75"] if "Is_Spot_Strong_75" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "Weak Close (<= 0.30 Range)":
+        cond_range = (filtered["Spot_Range_Pos"] <= 0.30) if "Spot_Range_Pos" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "Fut Strong Close (>= 0.70 Range)":
+        cond_range = filtered["Is_Fut_Strong_70"] if "Is_Fut_Strong_70" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "Fut Elite Close (>= 0.75 Range)":
+        cond_range = filtered["Is_Fut_Strong_75"] if "Is_Fut_Strong_75" in filtered else pd.Series(True, index=filtered.index)
+    else:
+        cond_range = pd.Series(True, index=filtered.index)
+
     # Base Value Area conditions
     cond_bull_vah = filtered["LTP"] > filtered["PD_VAH"]
     cond_bear_val = filtered["LTP"] < filtered["PD_VAL"]
@@ -1328,7 +1457,7 @@ def apply_screener_v2_filters(
     filtered["Bullish_Breakout"] = (
         cond_bull_vah & cond_bull_52w & cond_mtf_bull & cond_h1_bull & 
         cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib &
-        cond_rs_bull & cond_coiled & cond_oi_2d_bull & cond_swing_bull
+        cond_rs_bull & cond_coiled & cond_oi_2d_bull & cond_swing_bull & cond_range
     )
     filtered["Bearish_Breakdown"] = (
         cond_bear_val & cond_bear_52w & cond_mtf_bear & cond_h1_bear & 
@@ -1337,7 +1466,7 @@ def apply_screener_v2_filters(
     )
 
     # Global display filter (if user selected specific restrictive filters)
-    common_mask = cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib & cond_coiled
+    common_mask = cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib & cond_coiled & cond_range
     if h1_option_filter != "All":
         common_mask = common_mask & (cond_h1_bull | cond_h1_bear)
     if mtf_confluence_filter != "All":
@@ -1382,6 +1511,10 @@ def apply_screener_v2_filters(
         "coiled_spring_count": int(df["Is_Coiled_Spring"].sum()) if "Is_Coiled_Spring" in df else 0,
         "rs_outperforming_count": int(df["Is_RS_Outperforming"].sum()) if "Is_RS_Outperforming" in df else 0,
         "long_buildup_2d_count": int(df["Is_Long_Buildup_2D"].sum()) if "Is_Long_Buildup_2D" in df else 0,
+        "spot_strong_70_count": int(df["Is_Spot_Strong_70"].sum()) if "Is_Spot_Strong_70" in df else 0,
+        "spot_strong_75_count": int(df["Is_Spot_Strong_75"].sum()) if "Is_Spot_Strong_75" in df else 0,
+        "fut_strong_70_count": int(df["Is_Fut_Strong_70"].sum()) if "Is_Fut_Strong_70" in df else 0,
+        "fut_strong_75_count": int(df["Is_Fut_Strong_75"].sum()) if "Is_Fut_Strong_75" in df else 0,
     }
 
     return all_filtered, bullish_df, bearish_df, meta_stats
