@@ -18,6 +18,8 @@ import yfinance as yf
 
 import fibonacci_screener_v2
 importlib.reload(fibonacci_screener_v2)
+import swing_optimization_filters
+importlib.reload(swing_optimization_filters)
 from fo_stocks import get_yf_symbol, sanitize_symbol
 from volume_profile import calculate_volume_profile
 
@@ -382,16 +384,55 @@ def calculate_volume_and_derivatives_v2(
         
     is_high_delivery = delivery_pct > 50.0
 
-    # 2.2 Derivatives & Open Interest Data
+    # 2.2 Derivatives & Open Interest Data (Multi-Day Historical & Rolling)
     ltp_change_pct = ((ltp - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
     
-    if "Open_Interest" in df.columns and df["Open_Interest"].count() >= 2:
-        last_oi = float(df["Open_Interest"].iloc[-1])
-        prior_oi = float(df["Open_Interest"].iloc[-2])
-        oi_change_pct = ((last_oi - prior_oi) / prior_oi * 100.0) if prior_oi > 0 else 0.0
+    if "Open_Interest" in df.columns and df["Open_Interest"].dropna().count() >= 6:
+        oi_s = df["Open_Interest"].dropna()
+        curr_oi = float(oi_s.iloc[-1])
+        oi_change_pct = ((curr_oi - float(oi_s.iloc[-2])) / float(oi_s.iloc[-2]) * 100.0) if float(oi_s.iloc[-2]) > 0 else 0.0
+        oi_2d_pct = ((curr_oi - float(oi_s.iloc[-3])) / float(oi_s.iloc[-3]) * 100.0) if float(oi_s.iloc[-3]) > 0 else 0.0
+        oi_3d_pct = ((curr_oi - float(oi_s.iloc[-4])) / float(oi_s.iloc[-4]) * 100.0) if float(oi_s.iloc[-4]) > 0 else 0.0
+        oi_5d_pct = ((curr_oi - float(oi_s.iloc[-6])) / float(oi_s.iloc[-6]) * 100.0) if float(oi_s.iloc[-6]) > 0 else 0.0
+        
+        # Individual past days
+        oi_t1_pct = ((float(oi_s.iloc[-2]) - float(oi_s.iloc[-3])) / float(oi_s.iloc[-3]) * 100.0) if float(oi_s.iloc[-3]) > 0 else 0.0
+        oi_t2_pct = ((float(oi_s.iloc[-3]) - float(oi_s.iloc[-4])) / float(oi_s.iloc[-4]) * 100.0) if float(oi_s.iloc[-4]) > 0 else 0.0
+        oi_t3_pct = ((float(oi_s.iloc[-4]) - float(oi_s.iloc[-5])) / float(oi_s.iloc[-5]) * 100.0) if float(oi_s.iloc[-5]) > 0 else 0.0
+        oi_t4_pct = ((float(oi_s.iloc[-5]) - float(oi_s.iloc[-6])) / float(oi_s.iloc[-6]) * 100.0) if float(oi_s.iloc[-6]) > 0 else 0.0
     else:
-        # Estimate OI Change based on trading activity and price action
-        oi_change_pct = round(ltp_change_pct * 0.75 + (rvol - 1.0) * 1.5, 2)
+        # Multi-day F&O Institutional Activity Proxy when direct exchange OI feed is absent
+        close_s = df["Close"].dropna() if "Close" in df.columns else pd.Series()
+        if len(close_s) >= 6:
+            c0, c1, c2, c3, c4, c5 = float(close_s.iloc[-1]), float(close_s.iloc[-2]), float(close_s.iloc[-3]), float(close_s.iloc[-4]), float(close_s.iloc[-5]), float(close_s.iloc[-6])
+            p_1d = ((c0 - c1) / c1 * 100.0)
+            p_2d = ((c0 - c2) / c2 * 100.0)
+            p_3d = ((c0 - c3) / c3 * 100.0)
+            p_5d = ((c0 - c5) / c5 * 100.0)
+            
+            p_t1 = ((c1 - c2) / c2 * 100.0)
+            p_t2 = ((c2 - c3) / c3 * 100.0)
+            p_t3 = ((c3 - c4) / c4 * 100.0)
+            p_t4 = ((c4 - c5) / c5 * 100.0)
+            
+            oi_change_pct = round(p_1d * 0.75 + (rvol - 1.0) * 1.5, 2)
+            oi_2d_pct = round(p_2d * 0.85 + (rvol - 1.0) * 2.0, 2)
+            oi_3d_pct = round(p_3d * 0.90 + (rvol - 1.0) * 2.2, 2)
+            oi_5d_pct = round(p_5d * 0.95 + (rvol - 1.0) * 2.5, 2)
+            
+            oi_t1_pct = round(p_t1 * 0.75, 2)
+            oi_t2_pct = round(p_t2 * 0.75, 2)
+            oi_t3_pct = round(p_t3 * 0.75, 2)
+            oi_t4_pct = round(p_t4 * 0.75, 2)
+        else:
+            oi_change_pct = round(ltp_change_pct * 0.75 + (rvol - 1.0) * 1.5, 2)
+            oi_2d_pct = oi_change_pct
+            oi_3d_pct = oi_change_pct
+            oi_5d_pct = oi_change_pct
+            oi_t1_pct = 0.0
+            oi_t2_pct = 0.0
+            oi_t3_pct = 0.0
+            oi_t4_pct = 0.0
 
     # Classify OI Buildup
     if ltp_change_pct > 0 and oi_change_pct > 0:
@@ -428,6 +469,13 @@ def calculate_volume_and_derivatives_v2(
         "is_high_delivery": is_high_delivery,
         "ltp_change_pct": round(ltp_change_pct, 2),
         "oi_change_pct": round(oi_change_pct, 2),
+        "oi_2d_pct": round(oi_2d_pct, 2),
+        "oi_3d_pct": round(oi_3d_pct, 2),
+        "oi_5d_pct": round(oi_5d_pct, 2),
+        "oi_t1_pct": round(oi_t1_pct, 2),
+        "oi_t2_pct": round(oi_t2_pct, 2),
+        "oi_t3_pct": round(oi_t3_pct, 2),
+        "oi_t4_pct": round(oi_t4_pct, 2),
         "oi_buildup": oi_buildup,
         "pcr": pcr,
         "pcr_condition": pcr_condition
@@ -685,13 +733,18 @@ def fetch_universe_data_v2(
     symbols: List[str],
     timeframe: str = "5m",
     df_1y: Optional[pd.DataFrame] = None,
-    df_intraday: Optional[pd.DataFrame] = None
+    df_intraday: Optional[pd.DataFrame] = None,
+    df_benchmark: Optional[pd.DataFrame] = None,
+    benchmark_name: str = "NIFTY_TOTAL_MARKET",
+    **kwargs
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Downloads market data and computes all metrics for Screener Architecture V2.0:
     - Core MTF Strategy (1D PDH/PDL, 1H Initial Balance, 15m VWAP)
     - Advanced Data Validations (RVOL, Delivery %, OI Buildup, PCR)
     - Weekly Pivot & Money Zone Matrix (Forward-looking Monday Watchlist)
+    - Advanced Fibonacci & High Beta Confluence (Points 1 - 10)
+    - Swing Optimization Filters (Derivatives 2D OI Buildup, RS Alpha vs Nifty Total Market, Coiled Spring NR7/BB Squeeze)
     """
     clean_syms = [s.strip().upper() for s in symbols if sanitize_symbol(s)]
     if not clean_syms:
@@ -713,6 +766,13 @@ def fetch_universe_data_v2(
             df_intraday = fetch_intraday_data_v2(clean_syms, timeframe=timeframe)
         except Exception:
             df_intraday = pd.DataFrame()
+
+    # 3. Download benchmark historical data for Relative Strength (Nifty Total Market 750 / 500)
+    if df_benchmark is None or df_benchmark.empty:
+        try:
+            df_benchmark = swing_optimization_filters.fetch_benchmark_daily_data(benchmark_name)
+        except Exception:
+            df_benchmark = pd.DataFrame()
 
     records = []
     intraday_cache = {}
@@ -853,6 +913,30 @@ def fetch_universe_data_v2(
         dist_52w_high_pct = ((ltp - h52) / h52 * 100.0) if h52 > 0 else -100.0
         dist_52w_low_pct = ((ltp - l52) / l52 * 100.0) if l52 > 0 else 100.0
 
+        # Section 5: Swing Optimization Filters (Module: Swing_Optimization_Filters)
+        try:
+            swing_opt = swing_optimization_filters.evaluate_swing_optimization(
+                stock_df=sub_1y,
+                benchmark_df=df_benchmark,
+                fib_v2=fib_v2,
+                weekly_mz=weekly_mz,
+                ltp=ltp,
+                prev_close=prev_close,
+                rvol=vol_deriv.get("rvol", 1.0)
+            )
+        except Exception:
+            swing_opt = {
+                "is_long_buildup_2d": False, "is_short_buildup_2d": False,
+                "is_short_covering_2d": False, "is_long_unwinding_2d": False,
+                "oi_2d_change_pct": 0.0, "price_2d_delta_pct": 0.0, "oi_buildup_2d": "Neutral",
+                "is_rs_outperforming": False, "is_rs_underperforming": False,
+                "rs_alpha_pct": 0.0, "ret_stock_14d": 0.0, "ret_index_14d": 0.0, "rs_status": "Neutral",
+                "is_nr7": False, "is_bb_squeeze": False, "is_coiled_spring": False,
+                "bb_width_pct": 0.0, "bb_width_120_avg_pct": 0.0, "coiled_spring_tag": "Normal",
+                "is_swing_setup": False, "is_bullish_high_conviction": False, "is_bearish_high_conviction": False,
+                "swing_setup_tag": "Normal", "confluence_reasons": "None"
+            }
+
         records.append({
             "Symbol": sym,
             "LTP": round(ltp, 2),
@@ -906,6 +990,14 @@ def fetch_universe_data_v2(
             "Is_High_Delivery": vol_deriv["is_high_delivery"],
             "Delivery_Tag": f"🚚 {vol_deriv['delivery_pct']}%" if vol_deriv["is_high_delivery"] else f"{vol_deriv['delivery_pct']}%",
             "OI_Change%": vol_deriv["oi_change_pct"],
+            "OI_1D%": vol_deriv["oi_change_pct"],
+            "OI_2D%": vol_deriv["oi_2d_pct"],
+            "OI_3D%": vol_deriv["oi_3d_pct"],
+            "OI_5D%": vol_deriv["oi_5d_pct"],
+            "OI_T1%": vol_deriv["oi_t1_pct"],
+            "OI_T2%": vol_deriv["oi_t2_pct"],
+            "OI_T3%": vol_deriv["oi_t3_pct"],
+            "OI_T4%": vol_deriv["oi_t4_pct"],
             "OI_Buildup": vol_deriv["oi_buildup"],
             "PCR": vol_deriv["pcr"],
             "PCR_Condition": vol_deriv["pcr_condition"],
@@ -979,7 +1071,30 @@ def fetch_universe_data_v2(
             "Is_Golden_Pocket_Confluence": fib_v2.get("is_golden_pocket_confluence", False),
             "Is_Golden_Zone_Pullback": fib_v2.get("is_golden_zone_pullback", False),
             "Dist_0618%": fib_v2.get("dist_0618_pct", 999.0),
-            "Retrace%_1H": fib_v2.get("retrace_pct_1h", 0.0)
+            "Retrace%_1H": fib_v2.get("retrace_pct_1h", 0.0),
+            # Section 5: Swing Optimization Filters (Module: Swing_Optimization_Filters)
+            "RS_Alpha%": swing_opt["rs_alpha_pct"],
+            "Is_RS_Outperforming": swing_opt["is_rs_outperforming"],
+            "Is_RS_Underperforming": swing_opt["is_rs_underperforming"],
+            "Ret_Stock_14D%": swing_opt["ret_stock_14d"],
+            "Ret_Index_14D%": swing_opt["ret_index_14d"],
+            "RS_Status": swing_opt["rs_status"],
+            "OI_2D_Change%": swing_opt["oi_2d_change_pct"],
+            "Price_2D_Delta%": swing_opt["price_2d_delta_pct"],
+            "Is_Long_Buildup_2D": swing_opt["is_long_buildup_2d"],
+            "Is_Short_Buildup_2D": swing_opt["is_short_buildup_2d"],
+            "OI_Buildup_2D": swing_opt["oi_buildup_2d"],
+            "Is_NR7": swing_opt["is_nr7"],
+            "Is_BB_Squeeze": swing_opt["is_bb_squeeze"],
+            "Is_Coiled_Spring": swing_opt["is_coiled_spring"],
+            "BB_Width%": swing_opt["bb_width_pct"],
+            "BB_Width_120_Avg%": swing_opt["bb_width_120_avg_pct"],
+            "Coiled_Spring_Tag": swing_opt["coiled_spring_tag"],
+            "Is_Swing_Setup": swing_opt["is_swing_setup"],
+            "Is_Bullish_High_Conviction": swing_opt["is_bullish_high_conviction"],
+            "Is_Bearish_High_Conviction": swing_opt["is_bearish_high_conviction"],
+            "Swing_Setup_Tag": swing_opt["swing_setup_tag"],
+            "Swing_Confluence_Reasons": swing_opt["confluence_reasons"]
         })
 
     if not records:
@@ -1011,6 +1126,10 @@ def apply_screener_v2_filters(
     money_zone_setup_filter: str = "All",
     mtf_confluence_filter: str = "All",
     fib_confluence_filter: str = "All",
+    rs_filter: str = "All",
+    coiled_spring_filter: str = "All",
+    oi_2d_filter: str = "All",
+    swing_high_conviction_filter: str = "All",
     **kwargs
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     """
@@ -1158,6 +1277,49 @@ def apply_screener_v2_filters(
     else:
         cond_fib = pd.Series(True, index=filtered.index)
 
+    # 7. Section 5: Swing Optimization Filters (Module: Swing_Optimization_Filters)
+    if rs_filter == "RS Outperforming Index (Alpha > 0%)":
+        cond_rs_bull = filtered["Is_RS_Outperforming"] if "Is_RS_Outperforming" in filtered else pd.Series(True, index=filtered.index)
+        cond_rs_bear = pd.Series(False, index=filtered.index)
+    elif rs_filter == "RS Underperforming Index (Alpha < 0%)":
+        cond_rs_bull = pd.Series(False, index=filtered.index)
+        cond_rs_bear = filtered["Is_RS_Underperforming"] if "Is_RS_Underperforming" in filtered else pd.Series(True, index=filtered.index)
+    elif rs_filter in ["Outperforming Only (Alpha > 0%)", "RS Outperforming"]:
+        cond_rs_bull = filtered["Is_RS_Outperforming"] if "Is_RS_Outperforming" in filtered else pd.Series(True, index=filtered.index)
+        cond_rs_bear = filtered["Is_RS_Outperforming"] if "Is_RS_Outperforming" in filtered else pd.Series(True, index=filtered.index)
+    else:
+        cond_rs_bull = pd.Series(True, index=filtered.index)
+        cond_rs_bear = pd.Series(True, index=filtered.index)
+
+    if coiled_spring_filter in ["Coiled Spring (NR7 or BB Squeeze)", "Coiled Spring Only"]:
+        cond_coiled = filtered["Is_Coiled_Spring"] if "Is_Coiled_Spring" in filtered else pd.Series(True, index=filtered.index)
+    elif coiled_spring_filter == "NR7 Only (Range Contraction)":
+        cond_coiled = filtered["Is_NR7"] if "Is_NR7" in filtered else pd.Series(True, index=filtered.index)
+    elif coiled_spring_filter == "BB Squeeze Only (< 120D Avg)":
+        cond_coiled = filtered["Is_BB_Squeeze"] if "Is_BB_Squeeze" in filtered else pd.Series(True, index=filtered.index)
+    else:
+        cond_coiled = pd.Series(True, index=filtered.index)
+
+    if oi_2d_filter == "Long Buildup (2D >= 5%)":
+        cond_oi_2d_bull = filtered["Is_Long_Buildup_2D"] if "Is_Long_Buildup_2D" in filtered else pd.Series(True, index=filtered.index)
+        cond_oi_2d_bear = pd.Series(False, index=filtered.index)
+    elif oi_2d_filter == "Short Buildup (2D >= 5%)":
+        cond_oi_2d_bull = pd.Series(False, index=filtered.index)
+        cond_oi_2d_bear = filtered["Is_Short_Buildup_2D"] if "Is_Short_Buildup_2D" in filtered else pd.Series(True, index=filtered.index)
+    else:
+        cond_oi_2d_bull = pd.Series(True, index=filtered.index)
+        cond_oi_2d_bear = pd.Series(True, index=filtered.index)
+
+    if swing_high_conviction_filter == "High-Conviction Swing Only":
+        cond_swing_bull = filtered["Is_Bullish_High_Conviction"] if "Is_Bullish_High_Conviction" in filtered else pd.Series(True, index=filtered.index)
+        cond_swing_bear = filtered["Is_Bearish_High_Conviction"] if "Is_Bearish_High_Conviction" in filtered else pd.Series(True, index=filtered.index)
+    elif swing_high_conviction_filter == "Any Coiled Spring + Level Confluence":
+        cond_swing_bull = filtered["Is_Swing_Setup"] if "Is_Swing_Setup" in filtered else pd.Series(True, index=filtered.index)
+        cond_swing_bear = filtered["Is_Swing_Setup"] if "Is_Swing_Setup" in filtered else pd.Series(True, index=filtered.index)
+    else:
+        cond_swing_bull = pd.Series(True, index=filtered.index)
+        cond_swing_bear = pd.Series(True, index=filtered.index)
+
     # Base Value Area conditions
     cond_bull_vah = filtered["LTP"] > filtered["PD_VAH"]
     cond_bear_val = filtered["LTP"] < filtered["PD_VAL"]
@@ -1165,19 +1327,27 @@ def apply_screener_v2_filters(
     # Combine Bullish & Bearish signals
     filtered["Bullish_Breakout"] = (
         cond_bull_vah & cond_bull_52w & cond_mtf_bull & cond_h1_bull & 
-        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib
+        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib &
+        cond_rs_bull & cond_coiled & cond_oi_2d_bull & cond_swing_bull
     )
     filtered["Bearish_Breakdown"] = (
         cond_bear_val & cond_bear_52w & cond_mtf_bear & cond_h1_bear & 
-        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib
+        cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib &
+        cond_rs_bear & cond_coiled & cond_oi_2d_bear & cond_swing_bear
     )
 
     # Global display filter (if user selected specific restrictive filters)
-    common_mask = cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib
+    common_mask = cond_rvol & cond_delivery & cond_oi & cond_pcr & cond_mz & cond_fib & cond_coiled
     if h1_option_filter != "All":
         common_mask = common_mask & (cond_h1_bull | cond_h1_bear)
     if mtf_confluence_filter != "All":
         common_mask = common_mask & (cond_mtf_bull | cond_mtf_bear)
+    if rs_filter != "All":
+        common_mask = common_mask & (cond_rs_bull | cond_rs_bear)
+    if oi_2d_filter != "All":
+        common_mask = common_mask & (cond_oi_2d_bull | cond_oi_2d_bear)
+    if swing_high_conviction_filter != "All":
+        common_mask = common_mask & (cond_swing_bull | cond_swing_bear)
 
     all_filtered = filtered[common_mask].sort_values(by="Symbol").reset_index(drop=True)
     bullish_df = filtered[filtered["Bullish_Breakout"]].sort_values(by="Dist_52W_High%", ascending=False).reset_index(drop=True)
@@ -1208,6 +1378,10 @@ def apply_screener_v2_filters(
         "fib_gp_confluence_count": int(df["Is_Golden_Pocket_Confluence"].sum()) if "Is_Golden_Pocket_Confluence" in df else 0,
         "fib_at_gp_count": int(df["Is_Golden_Pocket"].sum()) if "Is_Golden_Pocket" in df else 0,
         "fib_golden_zone_count": int(df["Is_Golden_Zone_Pullback"].sum()) if "Is_Golden_Zone_Pullback" in df else 0,
+        "swing_high_conviction_count": int((df["Is_Bullish_High_Conviction"] | df["Is_Bearish_High_Conviction"]).sum()) if "Is_Bullish_High_Conviction" in df else 0,
+        "coiled_spring_count": int(df["Is_Coiled_Spring"].sum()) if "Is_Coiled_Spring" in df else 0,
+        "rs_outperforming_count": int(df["Is_RS_Outperforming"].sum()) if "Is_RS_Outperforming" in df else 0,
+        "long_buildup_2d_count": int(df["Is_Long_Buildup_2D"].sum()) if "Is_Long_Buildup_2D" in df else 0,
     }
 
     return all_filtered, bullish_df, bearish_df, meta_stats

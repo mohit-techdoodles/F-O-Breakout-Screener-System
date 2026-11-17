@@ -17,11 +17,13 @@ import fo_stocks
 import fibonacci_screener_v2
 import mtf_breakout
 import screener_v2_engine
+import swing_optimization_filters
 
 importlib.reload(fo_stocks)
 importlib.reload(fibonacci_screener_v2)
 importlib.reload(mtf_breakout)
 importlib.reload(screener_v2_engine)
+importlib.reload(swing_optimization_filters)
 
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
@@ -104,6 +106,53 @@ st.markdown("""
         border-radius: 6px;
         font-weight: 700;
         border: 1px solid rgba(255, 179, 0, 0.35);
+    }
+    .badge-swing {
+        background-color: rgba(255, 179, 0, 0.15);
+        color: #FFB300;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-weight: 700;
+        border: 1px solid rgba(255, 179, 0, 0.35);
+    }
+    .badge-coil {
+        background-color: rgba(0, 229, 255, 0.15);
+        color: #00E5FF;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-weight: 700;
+        border: 1px solid rgba(0, 229, 255, 0.35);
+    }
+    /* Clean Blue Scrollbar for Data Tables (without duplicate wrappers) */
+    [data-testid="stDataFrame"] *,
+    .dvn-scroller,
+    [data-testid="stTable"] * {
+        scrollbar-color: #3B82F6 rgba(15, 23, 42, 0.6) !important;
+        scrollbar-width: thin !important;
+    }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar,
+    .dvn-scroller::-webkit-scrollbar,
+    [data-testid="stTable"] *::-webkit-scrollbar {
+        width: 8px !important;
+        height: 8px !important;
+    }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar-track,
+    .dvn-scroller::-webkit-scrollbar-track,
+    [data-testid="stTable"] *::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.6) !important;
+        border-radius: 4px !important;
+    }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar-thumb,
+    .dvn-scroller::-webkit-scrollbar-thumb,
+    [data-testid="stTable"] *::-webkit-scrollbar-thumb {
+        background: #3B82F6 !important;
+        border-radius: 4px !important;
+        border: 1px solid rgba(59, 130, 246, 0.4) !important;
+    }
+    [data-testid="stDataFrame"] *::-webkit-scrollbar-thumb:hover,
+    .dvn-scroller::-webkit-scrollbar-thumb:hover,
+    [data-testid="stTable"] *::-webkit-scrollbar-thumb:hover {
+        background: #60A5FA !important;
     }
     .nav-banner {
         background: linear-gradient(90deg, #1E293B 0%, #0F172A 100%);
@@ -286,9 +335,57 @@ fib_confluence_filter = st.sidebar.selectbox(
     help="Select from Classic Golden Pocket setups (Option C Break-in, At 0.618, Golden Zone) or Advanced Points 1 - 10."
 )
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("5. Swing Trade Optimizations (High-Conviction)")
+
+benchmark_choice = st.sidebar.selectbox(
+    "Benchmark Index (Relative Strength)",
+    [
+        "Nifty Total Market (Broad 750 / 500)",
+        "Nifty 50 (^NSEI)",
+        "Bank Nifty (^NSEBANK)"
+    ],
+    index=0,
+    help="Section 2: Benchmark for 14-day Relative Strength Alpha (Ret_Stock - Ret_Index). Default is Nifty Total Market (Broad 750 / 500 Index)."
+)
+
+bench_map = {
+    "Nifty Total Market (Broad 750 / 500)": "NIFTY_TOTAL_MARKET",
+    "Nifty 50 (^NSEI)": "NIFTY50",
+    "Bank Nifty (^NSEBANK)": "BANKNIFTY"
+}
+bench_key = bench_map[benchmark_choice]
+
+require_coiled_spring = st.sidebar.checkbox(
+    "Require Coiled Spring (NR7 or BB Squeeze)",
+    value=False,
+    help="Section 3: Filters for extreme volatility compression (NR7 Range Contraction or BB Width < 120-Day Average) directly at key structural levels."
+)
+
+rs_option = st.sidebar.selectbox(
+    "Relative Strength (RS vs Benchmark)",
+    ["All", "RS Outperforming Index (Alpha > 0%)", "RS Underperforming Index (Alpha < 0%)"],
+    index=0,
+    help="Section 2: Require Outperforming for long swing setups, Underperforming for short swing setups."
+)
+
+oi_2d_filter = st.sidebar.selectbox(
+    "2-Day OI Buildup (Derivatives Confluence)",
+    ["All", "Long Buildup (2D >= 5%)", "Short Buildup (2D >= 5%)"],
+    index=0,
+    help="Section 1: 2-day rolling window OI change with minimum 5% threshold."
+)
+
+require_high_conviction = st.sidebar.checkbox(
+    "⭐ High-Conviction Swing Candidates Only",
+    value=False,
+    help="Master Confluence: Requires Coiled Spring + (Fibonacci or Money Zone level) + Directional RS Outperformance + Derivatives OI Buildup."
+)
+
 # Two-tier optimized caching:
 # 1. Daily 1-year data cached for 2 hours (historical bars don't change intraday)
 # 2. Intraday 5-day data cached for 120 seconds
+# 3. Benchmark daily data cached for 2 hours
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_daily_1y_data_cached(syms):
     return fetch_daily_1y_data_v2(syms)
@@ -297,11 +394,23 @@ def get_daily_1y_data_cached(syms):
 def get_intraday_data_cached(syms, tf):
     return fetch_intraday_data_v2(syms, timeframe=tf)
 
+@st.cache_data(ttl=7200, show_spinner=False)
+def get_benchmark_data_cached(b_key):
+    return swing_optimization_filters.fetch_benchmark_daily_data(b_key)
+
 @st.cache_data(ttl=120, show_spinner=False)
-def get_v2_data(syms, tf):
+def get_v2_data(syms, tf, b_key):
     d_1y = get_daily_1y_data_cached(syms)
     d_intra = get_intraday_data_cached(syms, tf)
-    return fetch_universe_data_v2(syms, timeframe=tf, df_1y=d_1y, df_intraday=d_intra)
+    d_bench = get_benchmark_data_cached(b_key)
+    return fetch_universe_data_v2(
+        syms,
+        timeframe=tf,
+        df_1y=d_1y,
+        df_intraday=d_intra,
+        df_benchmark=d_bench,
+        benchmark_name=b_key
+    )
 
 # Refresh Buttons
 c_ref1, c_ref2 = st.sidebar.columns([3, 1])
@@ -315,7 +424,7 @@ with c_ref2:
 
 # ----------------- Data Ingestion -----------------
 with st.spinner(f"Scanning market data for {len(selected_symbols)} F&O symbols (Architecture V2.0)..."):
-    raw_df, base_meta = get_v2_data(selected_symbols, timeframe)
+    raw_df, base_meta = get_v2_data(selected_symbols, timeframe, bench_key)
     if "intraday_cache" in base_meta:
         st.session_state["intraday_cache_v2"] = base_meta["intraday_cache"]
     if "daily_cache" in base_meta:
@@ -336,7 +445,11 @@ all_df, bull_df, bear_df, stats = apply_screener_v2_filters(
     pcr_squeeze_filter=pcr_filter,
     money_zone_setup_filter=money_zone_filter,
     mtf_confluence_filter=mtf_confluence,
-    fib_confluence_filter=fib_confluence_filter
+    fib_confluence_filter=fib_confluence_filter,
+    rs_filter=rs_option,
+    coiled_spring_filter="Coiled Spring (NR7 or BB Squeeze)" if require_coiled_spring else "All",
+    oi_2d_filter=oi_2d_filter,
+    swing_high_conviction_filter="High-Conviction Swing Only" if require_high_conviction else "All"
 )
 
 # ----------------- Top Metric Cards Row -----------------
@@ -434,12 +547,44 @@ with f6:
     </div>
     """, unsafe_allow_html=True)
 
+# ----------------- Swing Optimization KPI Row -----------------
+sw_col1, sw_col2, sw_col3, sw_col4 = st.columns(4)
+with sw_col1:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">⭐ High-Conviction Swings</div>
+        <div class="metric-val" style="color: #FFD54F;">{stats.get('swing_high_conviction_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with sw_col2:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">⚡ Coiled Springs (NR7/BB)</div>
+        <div class="metric-val" style="color: #00E5FF;">{stats.get('coiled_spring_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with sw_col3:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">🚀 RS Outperforming</div>
+        <div class="metric-val" style="color: #00E676;">{stats.get('rs_outperforming_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+with sw_col4:
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">📈 2D Long Buildup (OI ≥ 5%)</div>
+        <div class="metric-val" style="color: #AB47BC;">{stats.get('long_buildup_2d_count', 0)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 # ----------------- Main View Tabs -----------------
-tab1, tab2, tab3, tab_fib, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab_fib, tab_swing, tab4, tab5 = st.tabs([
     "🎯 Core MTF Breakouts",
     "📊 Volume & F&O Validations",
     "🔮 Weekly Money Zone Matrix",
     "📐 Advanced Fibonacci & Confluence",
+    "🚀 High-Conviction Swing (Spec)",
     "📈 Interactive Chart",
     "📜 Architecture Spec & Pine Script"
 ])
@@ -484,27 +629,138 @@ with tab1:
 # =====================================================================
 with tab2:
     st.markdown("#### 2. Advanced Data Validations (Volume & F&O Derivatives)")
-    st.caption("Filters out false breakouts using Relative Volume (RVOL ≥ 1.5), Delivery % > 50%, OI Buildup Quadrants, and Put-Call Ratio (PCR).")
+    st.caption("Filters out false breakouts using Relative Volume (RVOL ≥ 1.5), Delivery % > 50%, Derivatives OI Buildup (1D & 2D Rolling), and Put-Call Ratio (PCR).")
 
-    fo_cols = [
-        "Symbol", "LTP", "Chg%", "RVOL", "Volume_SMA30", "RVOL_Tag", 
-        "Delivery%", "Delivery_Tag", "OI_Change%", "OI_Buildup", "PCR", "PCR_Condition"
-    ]
-    view_fo_df = all_df[fo_cols].copy() if not all_df.empty else pd.DataFrame(columns=fo_cols)
+    # Interactive View Focus Selector (Eliminates off-screen clipping)
+    c_tab2_view, c_tab2_slider = st.columns([3, 2])
+    with c_tab2_view:
+        tab2_view_mode = st.radio(
+            "📋 Table View Mode:",
+            [
+                "🎯 Derivatives & OI Focus (Direct View)",
+                "📜 Complete Matrix (Volume + Delivery + OI + PCR)",
+                "📈 Past Historical OI Trend (T-0 to T-5 Days)"
+            ],
+            index=0,
+            horizontal=True,
+            help="Switch between focused Derivatives view (all OI columns immediately visible), Complete Matrix, or Multi-Day Past OI Tracker."
+        )
 
-    st.dataframe(
-        view_fo_df.style.format({
+    if tab2_view_mode == "🎯 Derivatives & OI Focus (Direct View)":
+        st.caption("⚡ **Direct View:** Clean layout showing only Derivatives, OI Buildup, and PCR columns without needing horizontal scrolling.")
+        deriv_cols = [
+            "Symbol", "LTP", "Chg%", "OI_Change%", "OI_2D_Change%", "OI_Buildup", "OI_Buildup_2D", "PCR", "PCR_Condition"
+        ]
+        available_deriv = [c for c in deriv_cols if c in all_df.columns]
+        deriv_df = all_df[available_deriv].copy() if not all_df.empty else pd.DataFrame(columns=available_deriv)
+
+        st.dataframe(
+            deriv_df.style.format({
+                "LTP": "₹{:.2f}",
+                "Chg%": "{:+.2f}%",
+                "OI_Change%": "{:+.2f}%",
+                "OI_2D_Change%": "{:+.2f}%",
+                "PCR": "{:.2f}"
+            }),
+            use_container_width=True,
+            height=450
+        )
+
+    elif tab2_view_mode == "📈 Past Historical OI Trend (T-0 to T-5 Days)":
+        with c_tab2_slider:
+            past_oi_days = st.slider(
+                "Scroll Past Lookback Period (Days):",
+                min_value=1,
+                max_value=5,
+                value=2,
+                step=1,
+                help="Slide to dynamically inspect past OI change % over 1, 2, 3, 4, or 5 trading sessions."
+            )
+
+        st.markdown(f"##### 📊 Past Historical OI Change % (Tracking past {past_oi_days} days & individual sessions)")
+        
+        # Pick the appropriate cumulative OI column based on slider
+        slider_col_map = {1: "OI_1D%", 2: "OI_2D%", 3: "OI_3D%", 4: "OI_3D%", 5: "OI_5D%"}
+        active_slider_col = slider_col_map.get(past_oi_days, "OI_2D%")
+
+        hist_cols = [
+            "Symbol", "LTP", "Chg%", active_slider_col, "OI_Change%", "OI_T1%", "OI_T2%", "OI_T3%", "OI_T4%", "OI_Buildup_2D"
+        ]
+        available_hist = [c for c in hist_cols if c in all_df.columns]
+        hist_df = all_df[available_hist].copy() if not all_df.empty else pd.DataFrame(columns=available_hist)
+
+        # Rename active slider col for user clarity
+        rename_map = {
+            active_slider_col: f"Selected Past {past_oi_days}D OI%",
+            "OI_Change%": "Today (T0) OI%",
+            "OI_T1%": "T-1 Day OI%",
+            "OI_T2%": "T-2 Day OI%",
+            "OI_T3%": "T-3 Day OI%",
+            "OI_T4%": "T-4 Day OI%",
+            "OI_Buildup_2D": "2D Buildup Category"
+        }
+        hist_display_df = hist_df.rename(columns=rename_map)
+
+        st.dataframe(
+            hist_display_df.style.format({
+                "LTP": "₹{:.2f}",
+                "Chg%": "{:+.2f}%",
+                f"Selected Past {past_oi_days}D OI%": "{:+.2f}%",
+                "Today (T0) OI%": "{:+.2f}%",
+                "T-1 Day OI%": "{:+.2f}%",
+                "T-2 Day OI%": "{:+.2f}%",
+                "T-3 Day OI%": "{:+.2f}%",
+                "T-4 Day OI%": "{:+.2f}%"
+            }),
+            use_container_width=True,
+            height=450
+        )
+
+    else:
+        # Complete Matrix
+        fo_cols = [
+            "Symbol", "LTP", "Chg%", "RVOL", "Volume_SMA30", 
+            "Delivery%", "OI_Change%", "OI_2D_Change%", "OI_Buildup", "OI_Buildup_2D", "PCR", "PCR_Condition"
+        ]
+        available_fo_cols = [c for c in fo_cols if c in all_df.columns]
+        view_fo_df = all_df[available_fo_cols].copy() if not all_df.empty else pd.DataFrame(columns=available_fo_cols)
+
+        fmt_dict = {
             "LTP": "₹{:.2f}",
             "Chg%": "{:+.2f}%",
             "RVOL": "{:.2f}x",
             "Volume_SMA30": "{:,}",
             "Delivery%": "{:.1f}%",
             "OI_Change%": "{:+.2f}%",
+            "OI_2D_Change%": "{:+.2f}%",
             "PCR": "{:.2f}"
-        }),
-        use_container_width=True,
-        height=480
-    )
+        }
+
+        st.dataframe(
+            view_fo_df.style.format({k: v for k, v in fmt_dict.items() if k in view_fo_df.columns}),
+            use_container_width=True,
+            height=480,
+            column_config={
+                "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                "LTP": st.column_config.TextColumn("LTP", width="small"),
+                "Chg%": st.column_config.TextColumn("Chg%", width="small"),
+                "RVOL": st.column_config.TextColumn("RVOL", width="small"),
+                "Volume_SMA30": st.column_config.TextColumn("Vol 30D Avg", width="small"),
+                "Delivery%": st.column_config.TextColumn("Delivery%", width="small"),
+                "OI_Change%": st.column_config.TextColumn("OI 1D%", width="small"),
+                "OI_2D_Change%": st.column_config.TextColumn("OI 2D%", width="small"),
+                "OI_Buildup": st.column_config.TextColumn("1D Buildup", width="small"),
+                "OI_Buildup_2D": st.column_config.TextColumn("2D Buildup", width="medium"),
+                "PCR": st.column_config.TextColumn("PCR", width="small"),
+                "PCR_Condition": st.column_config.TextColumn("PCR Status", width="medium"),
+            }
+        )
+
+        st.markdown("""
+        <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3B82F6; padding: 8px 14px; border-radius: 6px; margin-top: 10px; font-size: 0.88rem; color: #93C5FD;">
+            💡 <b>Scroll & Navigation Tip:</b> Drag horizontally inside the table above using your mouse trackpad or the highlighted blue scrollbar at the bottom to view columns past <b>OI Change %</b> (including 2D OI Buildup, PCR, and PCR Condition). Alternatively, switch to <b>🎯 Derivatives & OI Focus</b> above for a zero-scroll direct view.
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # =====================================================================
@@ -669,6 +925,131 @@ with tab_fib:
         8. **The Macro Anchor (Monthly Value + Weekly Fib):** 3-15 day swing hold when Weekly Fib aligns with MPOC and Monthly Pivots with Daily candlestick confirmation.
         9. **Weekly CPR Squeeze & Fib Expansion:** Volatility compression (Weekly CPR $< 0.5\%$) projecting targets +1.272 / +1.618 or -0.272 / -0.618.
         10. **Inside Week + Golden Pocket Compression:** Inside Week compression with Close within $\pm 1\%$ of Fib 0.618 and Weekly POC in the bottom 30% (Accumulation) or top 30% (Distribution).
+        """)
+
+
+# =====================================================================
+# TAB SWING: HIGH-CONVICTION SWING TRADE OPTIMIZATIONS (DEVELOPER SPEC)
+# =====================================================================
+with tab_swing:
+    st.markdown("#### 🚀 High-Conviction Swing Trade Optimizations")
+    st.caption("Module: `Swing_Optimization_Filters` | Multidimensional Confluence: Derivatives 2D OI Buildup (≥5%), 14-Day Relative Strength vs Nifty Total Market, and Volatility Compression (Coiled Spring: NR7 + BB Squeeze).")
+
+    # Swing KPI Row
+    sw1, sw2, sw3, sw4 = st.columns(4)
+    with sw1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-lbl">⭐ High-Conviction Swings</div>
+            <div class="metric-val" style="color: #FFD54F;">{stats.get('swing_high_conviction_count', 0)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with sw2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-lbl">⚡ Coiled Springs (NR7/BB)</div>
+            <div class="metric-val" style="color: #00E5FF;">{stats.get('coiled_spring_count', 0)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with sw3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-lbl">🚀 RS Outperforming (Alpha > 0)</div>
+            <div class="metric-val" style="color: #00E676;">{stats.get('rs_outperforming_count', 0)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with sw4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-lbl">📈 2D Long Buildup (OI ≥ 5%)</div>
+            <div class="metric-val" style="color: #AB47BC;">{stats.get('long_buildup_2d_count', 0)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Sub-views inside Swing Tab
+    sw_sub1, sw_sub2, sw_sub3 = st.tabs([
+        "⭐ High-Conviction Swing Candidates",
+        "⚡ Volatility Compression: Coiled Spring (NR7 + BB Squeeze)",
+        "📊 Full Universe Swing Optimization Monitor"
+    ])
+
+    with sw_sub1:
+        st.markdown("##### ⭐ High-Conviction Swing Trade Candidates (Multi-Dimensional Alignment)")
+        st.caption("Requires Coiled Spring compression directly at a Fibonacci or Money Zone structural level, validated by Relative Strength vs Nifty Total Market and Derivatives Open Interest buildup.")
+        
+        high_conv_df = all_df[all_df["Is_Swing_Setup"] == True].copy() if not all_df.empty else pd.DataFrame()
+        if not high_conv_df.empty:
+            sc_cols = [
+                "Symbol", "LTP", "Chg%", "Swing_Setup_Tag", "RS_Alpha%", "Ret_Stock_14D%", "Ret_Index_14D%",
+                "RS_Status", "OI_2D_Change%", "OI_Buildup_2D", "Coiled_Spring_Tag", "Swing_Confluence_Reasons"
+            ]
+            available_sc_cols = [c for c in sc_cols if c in high_conv_df.columns]
+            st.dataframe(high_conv_df[available_sc_cols], use_container_width=True)
+        else:
+            st.info("ℹ️ No stocks currently meet the strict High-Conviction Swing multi-dimensional criteria simultaneously. Check the 'Full Universe Swing Monitor' tab below to view all symbol rankings.")
+
+    with sw_sub2:
+        st.markdown("##### ⚡ The 'Coiled Spring' Monitor: NR7 Range Contraction & 120-Day BB Squeeze")
+        st.caption("Isolates symbols with extreme volatility compression ready for expansion before breakout.")
+        coiled_df = all_df[all_df["Is_Coiled_Spring"] == True].copy() if not all_df.empty else pd.DataFrame()
+        if not coiled_df.empty:
+            coil_cols = [
+                "Symbol", "LTP", "Chg%", "Coiled_Spring_Tag", "Is_NR7", "Is_BB_Squeeze",
+                "BB_Width%", "BB_Width_120_Avg%", "RS_Alpha%", "OI_2D_Change%"
+            ]
+            available_coil_cols = [c for c in coil_cols if c in coiled_df.columns]
+            st.dataframe(coiled_df[available_coil_cols], use_container_width=True)
+        else:
+            st.info("ℹ️ No symbols currently in NR7 or BB Squeeze compression state.")
+
+    with sw_sub3:
+        st.markdown("##### 📋 Full Universe Swing Optimization Monitor & CSV Export")
+        sw_monitor_cols = [
+            "Symbol", "LTP", "Chg%", "RS_Alpha%", "Ret_Stock_14D%", "Ret_Index_14D%", "RS_Status",
+            "OI_2D_Change%", "OI_Buildup_2D", "Is_Long_Buildup_2D", "Is_Short_Buildup_2D",
+            "Is_NR7", "Is_BB_Squeeze", "Coiled_Spring_Tag", "Swing_Setup_Tag", "Swing_Confluence_Reasons"
+        ]
+        available_mon_cols = [c for c in sw_monitor_cols if c in all_df.columns]
+        mon_df = all_df[available_mon_cols].copy() if not all_df.empty else pd.DataFrame(columns=sw_monitor_cols)
+        st.dataframe(mon_df, use_container_width=True)
+
+        csv_sw = mon_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Export Swing Optimization Data (CSV)",
+            data=csv_sw,
+            file_name=f"Swing_Optimization_Filters_{base_meta.get('live_date', 'today')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    # Strategy Execution Guide
+    st.markdown("---")
+    st.subheader("📚 Developer Specification Architecture: Swing Optimization Rules")
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        st.markdown(f"""
+        **1. Derivatives Confluence**
+        - **Metric:** 2-day rolling window (`OI_LOOKBACK_DAYS = 2`).
+        - **Long Buildup:** Price Delta > 0 AND OI Delta ≥ 5.0%.
+        - **Short Buildup:** Price Delta < 0 AND OI Delta ≥ 5.0%.
+        - **Institutional Purpose:** Confirms genuine smart money accumulation at Fibonacci/Value Area levels.
+        """)
+    with r2:
+        st.markdown(f"""
+        **2. Sector & Index Relative Strength (RS)**
+        - **Metric:** 14-day rolling return vs **{benchmark_choice}**.
+        - **Formula:** `rs_alpha_pct = Ret_Stock - Ret_Index`.
+        - **Bullish Rule:** Requires `Ret_Stock > Ret_Index` (Alpha > 0%).
+        - **Bearish Rule:** Requires `Ret_Stock < Ret_Index` (Alpha < 0%).
+        - **Purpose:** Eliminates lagging stocks, focusing only on leaders.
+        """)
+    with r3:
+        st.markdown(f"""
+        **3. The 'Coiled Spring'**
+        - **NR7:** Today's True Range < MIN(Previous 6 days' True Range).
+        - **BB Squeeze:** Current Bandwidth < 120-Day Average Bandwidth.
+        - **Master Confluence:** Flagged when `(NR7 OR BB Squeeze)` aligns with a **Fibonacci** or **Money Zone** level.
+        - **Purpose:** Pinpoints maximum coiled energy before explosive trend moves.
         """)
 
 
