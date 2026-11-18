@@ -146,7 +146,8 @@ def calculate_extension_breakouts(
     ltp: float,
     curr_vol: float,
     avg_vol: float,
-    swing_type: str = "Neutral"
+    swing_type: str = "Neutral",
+    chg_pct: float = 0.0
 ) -> Tuple[bool, float, float, float, str]:
     """
     Point 2: Fibonacci Extension Breakouts & Downside Breakdowns (1.272 & 1.618)
@@ -154,6 +155,9 @@ def calculate_extension_breakouts(
     or breaking down below 0.0 (Swing Low) tracking pure momentum.
     Bullish Trigger: Close > Swing_High AND Current_Volume > Avg_Volume
     Bearish Trigger: Close < Swing_Low AND Current_Volume > Avg_Volume
+    Option A: If price is inside range, but stock is down on the day (chg_pct < 0) and trading
+    below the 50% midpoint (ltp < mid_point), it aligns with the intraday downtrend and projects
+    downward extension targets (ext_1_bear, ext_2_bear).
     """
     if np.isnan(swing_high) or np.isnan(swing_low) or swing_high <= swing_low:
         return False, np.nan, np.nan, 0.0, "None"
@@ -181,10 +185,15 @@ def calculate_extension_breakouts(
         tag = "Bullish Blue Sky" if vol_confirmed else "Bullish Breakout (Low Vol)"
         return bool(vol_confirmed), round(ext_1_bull, 2), round(ext_2_bull, 2), round(dist_pct, 2), tag
 
-    # 3. Inside Range: Project target based on directional trend (swing_type / price location)
+    # 3. Inside Range: Project target based on directional trend (swing_type / price location / Option A)
     else:
         mid_point = (swing_high + swing_low) / 2.0
-        is_bearish = (swing_type == "Bearish") or (ltp < mid_point and swing_type != "Bullish")
+        # Option A: Align with intraday momentum and 50% midpoint
+        is_bearish = (
+            (swing_type == "Bearish") or
+            (ltp < mid_point and chg_pct < 0) or
+            (ltp < mid_point and swing_type != "Bullish")
+        )
         
         if is_bearish:
             dist_pct = ((ltp - ext_1_bear) / ltp * 100.0) if ltp > 0 else 0.0
@@ -900,6 +909,26 @@ def calculate_fibonacci_v2_enhancements(
     sh_1h, sl_1h, st_1h, _, _ = calculate_fractal_pivots(df_1h, window_bars=25)
     sh_15m, sl_15m, st_15m, _, _ = calculate_fractal_pivots(df_15m, window_bars=12)
 
+    # Calculate day change % for Option A directional calibration
+    chg_pct = 0.0
+    if prev_candles is not None and not prev_candles.empty:
+        cols_p = {c.lower(): c for c in prev_candles.columns}
+        p_close = float(prev_candles[cols_p.get("close", "Close")].iloc[-1])
+        if p_close > 0:
+            chg_pct = (ltp - p_close) / p_close * 100.0
+    elif not sub_intra.empty:
+        p_open = float(sub_intra["Open"].iloc[0])
+        if p_open > 0:
+            chg_pct = (ltp - p_open) / p_open * 100.0
+
+    # Option A: Calibrate 1H swing direction based on Day Chg % and 50% midpoint
+    if not np.isnan(sh_1h) and not np.isnan(sl_1h) and sh_1h > sl_1h:
+        mid_1h = (sh_1h + sl_1h) / 2.0
+        if chg_pct < 0 and ltp < mid_1h:
+            st_1h = "Bearish"
+        elif chg_pct > 0 and ltp > mid_1h:
+            st_1h = "Bullish"
+
     fibs_1h = get_fibonacci_array(sh_1h, sl_1h, st_1h)
     fibs_15m = get_fibonacci_array(sh_15m, sl_15m, st_15m)
 
@@ -938,10 +967,12 @@ def calculate_fibonacci_v2_enhancements(
     default_res["cluster_level_price"] = cl_price
     default_res["cluster_labels"] = cl_lbls
 
-    # Point 2: Extension Breakouts & Downside Breakdowns
+    # Point 2: Extension Breakouts & Downside Breakdowns (Option A)
     curr_v = float(curr_candles["Volume"].iloc[-1]) if not curr_candles.empty else 0.0
     avg_v = float(df_1h["Volume"].iloc[-20:].mean()) if len(df_1h) >= 5 else 0.0
-    is_ext, ext_1, ext_2, dist_ext, ext_tag = calculate_extension_breakouts(sh_1h, sl_1h, ltp, curr_v, avg_v, swing_type=st_1h)
+    is_ext, ext_1, ext_2, dist_ext, ext_tag = calculate_extension_breakouts(
+        sh_1h, sl_1h, ltp, curr_v, avg_v, swing_type=st_1h, chg_pct=chg_pct
+    )
     default_res["is_ext_breakout"] = is_ext
     default_res["ext_target_1"] = ext_1
     default_res["ext_target_2"] = ext_2

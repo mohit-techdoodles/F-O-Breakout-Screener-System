@@ -31,7 +31,8 @@ from screener_v2_engine import (
     fetch_daily_1y_data_v2,
     fetch_intraday_data_v2,
     apply_screener_v2_filters,
-    calculate_mtf_v2
+    calculate_mtf_v2,
+    ensure_decimal_columns
 )
 from mtf_breakout import PINE_SCRIPT_V5_CODE
 from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
@@ -506,6 +507,7 @@ all_df, bull_df, bear_df, stats = apply_screener_v2_filters(
     swing_high_conviction_filter="High-Conviction Swing Only" if require_high_conviction else "All",
     range_pos_filter=range_pos_choice
 )
+all_df = ensure_decimal_columns(all_df)
 
 # ----------------- Top Metric Cards Row -----------------
 m1, m2, m3, m4, m5, m6 = st.columns(6)
@@ -723,44 +725,56 @@ with tab2:
         )
 
     elif tab2_view_mode == "🏷️ Spot vs Future Pricing Matrix (.70/.75 Decimals)":
-        st.caption("⚡ **Spot vs Future Dual Pricing & 0.70 / 0.75 Decimal Filter:** Evaluates Live Intraday Range Location separately from Closing vs Opening 1-Hour (IB) Range position and breakout direction.")
+        st.caption("⚡ **Spot vs Future Dual Pricing & Exact .70 / .75 Decimal Scanner:** Strictly identifies stocks whose Spot price or Future price ends in exact .70 or .75 decimal paise (e.g., ₹11049.70 or ₹11049.75), separated across Intraday (High/Low) and Market Closing with 1H Opening Breakout/Breakdown direction.")
 
-        # Dedicated Filter Selector: Defaults to strictly showing ONLY 0.70 / 0.75 qualifying stocks
+        # Dedicated Filter Selector: Defaults to strictly showing ONLY exact .70 / .75 decimal qualifying stocks
         c_p_flt, c_p_desc = st.columns([3, 2])
         with c_p_flt:
             p_filter_mode = st.selectbox(
                 "🎯 Decimal & Range Filter Mode (Strict View):",
                 [
-                    "🔥 All Qualifying .70 / .75 & 1H Breakouts (Strict - Default)",
-                    "⭐ Elite Range (>= 0.75 Intraday or 1H Close)",
-                    "🟢 Strong Range (>= 0.70 Intraday or 1H Close)",
+                    "🎯 Exact .70 / .75 Decimals (Spot or Future - Strict)",
+                    "🔥 Closing .70 / .75 Decimals Only (Spot Close or Fut Close)",
+                    "📍 Intraday .70 / .75 Decimals Only (High / Low)",
                     "🚀 Bullish 1H Breakouts (> 10:15 AM High)",
                     "🔻 Bearish 1H Breakdowns (< 10:15 AM Low)",
-                    "🪙 Exact .70 / .75 Decimal Tick (NSE Paise)",
+                    "⭐ Range Ratio >= 0.75 (Intraday or 1H Close)",
+                    "🟢 Range Ratio >= 0.70 (Intraday or 1H Close)",
                     "🌐 Show All Scanned Stocks (Unfiltered)"
                 ],
                 index=0,
-                help="By default, this view strictly filters and shows ONLY stocks qualifying for 0.70 or 0.75 range position, 1H breakouts, or exact decimals. Non-qualifying stocks are excluded."
+                help="By default, strictly displays ONLY stocks whose Spot or Future price ends in exact .70 or .75 decimal paise."
             )
 
+        # Safe helper to extract boolean Series avoiding KeyError scalar indexing
+        def _get_bool_s(d: pd.DataFrame, col_name: str) -> pd.Series:
+            if col_name in d.columns:
+                s = d[col_name]
+                return s.fillna(False).astype(bool) if hasattr(s, "fillna") else pd.Series(False, index=d.index)
+            if "LTP" in d.columns:
+                p_col = d["Spot_Close"] if "Spot_Close" in d.columns else d["LTP"]
+                return p_col.apply(lambda p: int(round(float(p) * 100)) % 100 in (70, 75))
+            return pd.Series(False, index=d.index)
+
         # Apply strict filtering
-        if p_filter_mode == "🔥 All Qualifying .70 / .75 & 1H Breakouts (Strict - Default)":
-            p_mask = (
-                (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) |
-                (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70) |
-                (all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
-                (all_df.get("Has_Decimal_70_75", False) == True)
-            )
-        elif p_filter_mode == "⭐ Elite Range (>= 0.75 Intraday or 1H Close)":
-            p_mask = (all_df.get("Intra_Range_Pos", 0.0) >= 0.75) | (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.75)
-        elif p_filter_mode == "🟢 Strong Range (>= 0.70 Intraday or 1H Close)":
-            p_mask = (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) | (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70)
+        if p_filter_mode == "🎯 Exact .70 / .75 Decimals (Spot or Future - Strict)":
+            p_mask = _get_bool_s(all_df, "Has_Exact_Decimal_70_75")
+        elif p_filter_mode == "🔥 Closing .70 / .75 Decimals Only (Spot Close or Fut Close)":
+            p_mask = _get_bool_s(all_df, "Has_Close_Decimal_70_75")
+        elif p_filter_mode == "📍 Intraday .70 / .75 Decimals Only (High / Low)":
+            p_mask = _get_bool_s(all_df, "Has_Intra_Decimal_70_75")
         elif p_filter_mode == "🚀 Bullish 1H Breakouts (> 10:15 AM High)":
-            p_mask = all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")
+            p_mask = all_df["One_Hour_Break_Status"].astype(str).str.contains("Bullish") if "One_Hour_Break_Status" in all_df.columns else pd.Series(False, index=all_df.index)
         elif p_filter_mode == "🔻 Bearish 1H Breakdowns (< 10:15 AM Low)":
-            p_mask = all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bearish")
-        elif p_filter_mode == "🪙 Exact .70 / .75 Decimal Tick (NSE Paise)":
-            p_mask = all_df.get("Has_Decimal_70_75", False) == True
+            p_mask = all_df["One_Hour_Break_Status"].astype(str).str.contains("Bearish") if "One_Hour_Break_Status" in all_df.columns else pd.Series(False, index=all_df.index)
+        elif p_filter_mode == "⭐ Range Ratio >= 0.75 (Intraday or 1H Close)":
+            c1 = all_df["Intra_Range_Pos"] >= 0.75 if "Intra_Range_Pos" in all_df.columns else pd.Series(False, index=all_df.index)
+            c2 = all_df["Close_vs_1H_Range_Pos"] >= 0.75 if "Close_vs_1H_Range_Pos" in all_df.columns else pd.Series(False, index=all_df.index)
+            p_mask = c1 | c2
+        elif p_filter_mode == "🟢 Range Ratio >= 0.70 (Intraday or 1H Close)":
+            c1 = all_df["Intra_Range_Pos"] >= 0.70 if "Intra_Range_Pos" in all_df.columns else pd.Series(False, index=all_df.index)
+            c2 = all_df["Close_vs_1H_Range_Pos"] >= 0.70 if "Close_vs_1H_Range_Pos" in all_df.columns else pd.Series(False, index=all_df.index)
+            p_mask = c1 | c2
         else:
             p_mask = pd.Series(True, index=all_df.index)
 
@@ -768,16 +782,17 @@ with tab2:
 
         # Summary Metrics
         pm1, pm2, pm3, pm4 = st.columns(4)
-        pm1.metric("Qualifying Stocks", len(pricing_filtered), f"of {len(all_df)} scanned")
-        pm2.metric("Intraday Range >= 0.70", int((all_df.get("Intra_Range_Pos", 0.0) >= 0.70).sum()))
-        pm3.metric("1H Bullish Breakouts", int(all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish").sum()))
-        pm4.metric("1H Bearish Breakdowns", int(all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bearish").sum()))
+        pm1.metric("Exact .70 / .75 Matches", int(_get_bool_s(all_df, "Has_Exact_Decimal_70_75").sum()), f"of {len(all_df)} scanned")
+        pm2.metric("Closing .70 / .75", int(_get_bool_s(all_df, "Has_Close_Decimal_70_75").sum()), "Spot/Fut Close")
+        pm3.metric("1H Bullish Breakouts", int(all_df["One_Hour_Break_Status"].astype(str).str.contains("Bullish").sum() if "One_Hour_Break_Status" in all_df.columns else 0))
+        pm4.metric("1H Bearish Breakdowns", int(all_df["One_Hour_Break_Status"].astype(str).str.contains("Bearish").sum() if "One_Hour_Break_Status" in all_df.columns else 0))
 
         pricing_cols = [
-            "Symbol", "Spot_Close", "Spot_High", "Spot_Low",
+            "Symbol", "Spot_Close", "Spot_Decimal", "Fut_Close", "Fut_Decimal", "Decimal_Match_Tag",
+            "One_Hour_Break_Status", "Chg%",
+            "Spot_High", "Spot_Low", "Fut_High", "Fut_Low",
             "Intra_Range_Pos", "Intra_Range_Tag",
-            "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
-            "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
+            "Close_vs_1H_Range_Pos",
             "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
         ]
         available_pricing = [c for c in pricing_cols if c in pricing_filtered.columns]
@@ -786,14 +801,14 @@ with tab2:
         st.dataframe(
             pricing_df.style.format({
                 "Spot_Close": "₹{:.2f}",
+                "Fut_Close": "₹{:.2f}",
+                "Chg%": "{:+.2f}%",
                 "Spot_High": "₹{:.2f}",
                 "Spot_Low": "₹{:.2f}",
-                "Intra_Range_Pos": "{:.2f}",
-                "Close_vs_1H_Range_Pos": "{:.2f}",
-                "Fut_Close": "₹{:.2f}",
                 "Fut_High": "₹{:.2f}",
                 "Fut_Low": "₹{:.2f}",
-                "Fut_Range_Pos": "{:.2f}",
+                "Intra_Range_Pos": "{:.2f}",
+                "Close_vs_1H_Range_Pos": "{:.2f}",
                 "Fut_Basis": "₹{:+.2f}",
                 "Fut_Basis%": "{:+.2f}%"
             }),
@@ -801,18 +816,15 @@ with tab2:
             height=450,
             column_config={
                 "Symbol": st.column_config.TextColumn("Symbol", width="small"),
-                "Spot_Close": st.column_config.TextColumn("Spot Close", width="small"),
-                "Spot_High": st.column_config.TextColumn("Spot High", width="small"),
-                "Spot_Low": st.column_config.TextColumn("Spot Low", width="small"),
-                "Intra_Range_Pos": st.column_config.NumberColumn("Intra Range Pos", help="Live intraday position ((LTP - Day Low) / (Day High - Day Low)). >= 0.70/0.75 indicates strong intraday range position.", format="%.2f"),
-                "Intra_Range_Tag": st.column_config.TextColumn("Intra Location", width="medium"),
+                "Spot_Close": st.column_config.TextColumn("Spot Close ₹", width="small"),
+                "Spot_Decimal": st.column_config.TextColumn("Spot Dec", help="Paise decimal of Spot Close (.70, .75, etc.)", width="small"),
+                "Fut_Close": st.column_config.TextColumn("Fut Close ₹", width="small"),
+                "Fut_Decimal": st.column_config.TextColumn("Fut Dec", help="Paise decimal of Future Close (.70, .75, etc.)", width="small"),
+                "Decimal_Match_Tag": st.column_config.TextColumn("🎯 Decimal Match", help="Exact .70 or .75 detection across Spot Close, Fut Close, or Intraday High/Low", width="medium"),
                 "One_Hour_Break_Status": st.column_config.TextColumn("1H Breakout Status", help="Direction after 10:15 AM: Bullish breakout above 1H High, Bearish breakdown below 1H Low, or Inside range.", width="medium"),
-                "Close_vs_1H_Range_Pos": st.column_config.NumberColumn("Close vs 1H Pos", help="Position relative to 1H range ((Close - 1H Low) / (1H High - 1H Low)). > 1.0 = Bullish Breakout, < 0.0 = Bearish Breakdown.", format="%.2f"),
-                "Fut_Close": st.column_config.TextColumn("Fut Close", width="small"),
-                "Fut_High": st.column_config.TextColumn("Fut High", width="small"),
-                "Fut_Low": st.column_config.TextColumn("Fut Low", width="small"),
-                "Fut_Range_Pos": st.column_config.NumberColumn("Fut Range Pos", format="%.2f"),
-                "Fut_Range_Tag": st.column_config.TextColumn("Fut Location", width="medium"),
+                "Chg%": st.column_config.TextColumn("Day Chg %", width="small"),
+                "Intra_Range_Pos": st.column_config.NumberColumn("Intra Range Pos", help="Live intraday position ((LTP - Day Low) / (Day High - Day Low)).", format="%.2f"),
+                "Close_vs_1H_Range_Pos": st.column_config.NumberColumn("Close vs 1H Pos", help="Position relative to 1H range ((Close - 1H Low) / (1H High - 1H Low)).", format="%.2f"),
                 "Fut_Basis": st.column_config.TextColumn("Basis (₹)", width="small"),
                 "Fut_Basis%": st.column_config.TextColumn("Basis %", width="small"),
                 "Days_To_Expiry": st.column_config.NumberColumn("Days Expiry", width="small")
@@ -915,30 +927,25 @@ with tab2:
         </div>
         """, unsafe_allow_html=True)
 
-    with st.expander("🏷️ Spot vs Future Pricing Matrix (Intraday High, Low, Final Market Close & 0.70 / 0.75 Range Position)", expanded=False):
-        st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Tick-Aligned .70, .75 Precision & Day Range Ratio)")
+    with st.expander("🏷️ Spot vs Future Pricing Matrix (Exact .70 / .75 Decimals, Intraday High/Low & Closing)", expanded=False):
+        st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Strict .70 / .75 Decimal Tick Scanner)")
         st.caption("Strict filter view: Displays tick-aligned decimals (.70, .75) for Spot and Future, with separate Intraday Range Location and Closing vs 1H Opening Range Position.")
 
         c_exp_f, _ = st.columns([3, 2])
         with c_exp_f:
-            exp_strict = st.checkbox("Strict Filter: Show only .70 / .75 & 1H Breakouts", value=True, key="chk_exp_strict_pricing")
+            exp_strict = st.checkbox("🎯 Strict Filter: Show ONLY Exact .70 / .75 Decimals (Spot & Future)", value=True, key="chk_exp_strict_pricing")
 
         if exp_strict:
-            exp_mask = (
-                (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) |
-                (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70) |
-                (all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
-                (all_df.get("Has_Decimal_70_75", False) == True)
-            )
+            exp_mask = _get_bool_s(all_df, "Has_Exact_Decimal_70_75")
             exp_base_df = all_df[exp_mask].copy() if not all_df.empty else pd.DataFrame(columns=all_df.columns)
         else:
             exp_base_df = all_df.copy()
 
         exp_pricing_cols = [
-            "Symbol", "Spot_Close", "Spot_High", "Spot_Low",
-            "Intra_Range_Pos", "Intra_Range_Tag",
-            "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
-            "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
+            "Symbol", "Spot_Close", "Spot_Decimal", "Fut_Close", "Fut_Decimal", "Decimal_Match_Tag",
+            "One_Hour_Break_Status", "Chg%",
+            "Spot_High", "Spot_Low", "Fut_High", "Fut_Low",
+            "Intra_Range_Pos", "Close_vs_1H_Range_Pos",
             "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
         ]
         available_exp = [c for c in exp_pricing_cols if c in exp_base_df.columns]
@@ -947,14 +954,14 @@ with tab2:
         st.dataframe(
             exp_p_df.style.format({
                 "Spot_Close": "₹{:.2f}",
+                "Fut_Close": "₹{:.2f}",
+                "Chg%": "{:+.2f}%",
                 "Spot_High": "₹{:.2f}",
                 "Spot_Low": "₹{:.2f}",
-                "Intra_Range_Pos": "{:.2f}",
-                "Close_vs_1H_Range_Pos": "{:.2f}",
-                "Fut_Close": "₹{:.2f}",
                 "Fut_High": "₹{:.2f}",
                 "Fut_Low": "₹{:.2f}",
-                "Fut_Range_Pos": "{:.2f}",
+                "Intra_Range_Pos": "{:.2f}",
+                "Close_vs_1H_Range_Pos": "{:.2f}",
                 "Fut_Basis": "₹{:+.2f}",
                 "Fut_Basis%": "{:+.2f}%"
             }),

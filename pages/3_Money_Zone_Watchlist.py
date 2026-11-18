@@ -39,7 +39,8 @@ from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
     fetch_universe_data_v2,
     fetch_daily_1y_data_v2,
-    fetch_intraday_data_v2
+    fetch_intraday_data_v2,
+    ensure_decimal_columns
 )
 import swing_optimization_filters
 from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
@@ -586,33 +587,31 @@ categories_data[14] = {
     }
 }
 
-# 15. Strong Range Close & 1H Breakout (0.70 / 0.75 & Opening 1H Direction)
-mask_15 = (
-    (raw_df.get("Is_Intra_Strong_70", False) == True) |
-    (raw_df.get("Is_Close_1H_Strong_70", False) == True) |
-    (raw_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
-    (raw_df.get("Has_Decimal_70_75", False) == True)
-)
-df_cat15 = raw_df[mask_15].copy().sort_values(by="Intra_Range_Pos", ascending=False).reset_index(drop=True)
+# 15. Exact .70 / .75 Decimal Tick Precision (Spot & Future)
+raw_df = ensure_decimal_columns(raw_df)
+mask_15 = raw_df["Has_Exact_Decimal_70_75"] if "Has_Exact_Decimal_70_75" in raw_df.columns else pd.Series(False, index=raw_df.index)
+df_cat15 = raw_df[mask_15].copy().reset_index(drop=True)
 categories_data[15] = {
     "num": 15,
-    "icon": "🔥",
-    "name": "Elite Close in Range (0.70 / 0.75 & 1H Opening Breakout)",
-    "group": "Part V: Intraday Close Strength & Tick Precision",
-    "desc": "Closing momentum strength: Evaluates live intraday range position (>= 0.70 / 0.75) separately from post-10:15 AM opening 1-Hour breakdown/breakout status and tick-aligned (.70, .75) precision.",
+    "icon": "🪙",
+    "name": "Exact .70 / .75 Decimal Tick Precision (Spot & Future)",
+    "group": "Part V: Strict Decimal Tick Scanner (.70 / .75)",
+    "desc": "Strict tick scanner: Displays ONLY stocks whose Spot price or Future price ends in exact .70 or .75 decimal paise (e.g., ₹11049.70 or ₹11049.75), separated across Intraday (High/Low) and Market Closing with 1H opening breakout/breakdown direction.",
     "df": df_cat15,
     "display_cols": [
-        "Symbol", "LTP", "Chg%", "Intra_Range_Pos", "Intra_Range_Tag",
-        "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
-        "Spot_Close", "Spot_High", "Spot_Low",
-        "Fut_Close", "Fut_Range_Pos", "Fut_Basis"
+        "Symbol", "Spot_Close", "Spot_Decimal", "Fut_Close", "Fut_Decimal",
+        "Decimal_Match_Tag", "One_Hour_Break_Status", "Chg%",
+        "Spot_High", "Spot_Low", "Fut_High", "Fut_Low", "Fut_Basis"
     ],
     "fmt": {
-        "LTP": "₹{:.2f}", "Chg%": "{:+.2f}%",
-        "Intra_Range_Pos": "{:.2f}",
-        "Close_vs_1H_Range_Pos": "{:.2f}",
-        "Spot_Close": "₹{:.2f}", "Spot_High": "₹{:.2f}", "Spot_Low": "₹{:.2f}",
-        "Fut_Close": "₹{:.2f}", "Fut_Range_Pos": "{:.2f}", "Fut_Basis": "₹{:+.2f}"
+        "Spot_Close": "₹{:.2f}",
+        "Fut_Close": "₹{:.2f}",
+        "Chg%": "{:+.2f}%",
+        "Spot_High": "₹{:.2f}",
+        "Spot_Low": "₹{:.2f}",
+        "Fut_High": "₹{:.2f}",
+        "Fut_Low": "₹{:.2f}",
+        "Fut_Basis": "₹{:+.2f}"
     }
 }
 

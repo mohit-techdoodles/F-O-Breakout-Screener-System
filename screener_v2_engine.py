@@ -152,10 +152,47 @@ def calculate_spot_and_future_pricing(
 
     fut_range_tag = "🔥 Top 25% (>= 0.75)" if fut_range_pos >= 0.75 else ("🟢 Top 30% (>= 0.70)" if fut_range_pos >= 0.70 else ("🔴 Bottom 30% (<= 0.30)" if fut_range_pos <= 0.30 else "⚪ Neutral"))
 
-    # 3. Exact .70 / .75 decimal detection
-    spot_decimal = round(spot_c % 1.0, 2)
-    fut_decimal = round(fut_c % 1.0, 2)
-    has_decimal_70_75 = bool(spot_decimal in (0.70, 0.75) or fut_decimal in (0.70, 0.75))
+    # 3. Exact .70 / .75 decimal detection (Spot & Future, Intraday & Closing)
+    spot_c_paise = int(round(spot_c * 100)) % 100
+    spot_h_paise = int(round(spot_h * 100)) % 100
+    spot_l_paise = int(round(spot_l * 100)) % 100
+    fut_c_paise = int(round(fut_c * 100)) % 100
+    fut_h_paise = int(round(fut_h * 100)) % 100
+    fut_l_paise = int(round(fut_l * 100)) % 100
+
+    spot_close_has_70_75 = spot_c_paise in (70, 75)
+    fut_close_has_70_75 = fut_c_paise in (70, 75)
+    has_close_decimal_70_75 = bool(spot_close_has_70_75 or fut_close_has_70_75)
+
+    spot_intra_has_70_75 = bool((spot_h_paise in (70, 75)) or (spot_l_paise in (70, 75)))
+    fut_intra_has_70_75 = bool((fut_h_paise in (70, 75)) or (fut_l_paise in (70, 75)))
+    has_intra_decimal_70_75 = bool(spot_intra_has_70_75 or fut_intra_has_70_75)
+
+    has_exact_decimal_70_75 = bool(has_close_decimal_70_75 or has_intra_decimal_70_75)
+
+    spot_dec_str = f".{spot_c_paise:02d}"
+    fut_dec_str = f".{fut_c_paise:02d}"
+
+    if spot_close_has_70_75 and fut_close_has_70_75:
+        decimal_match_tag = f"🔥 Both Spot ({spot_dec_str}) & Fut ({fut_dec_str}) Close"
+    elif spot_close_has_70_75:
+        decimal_match_tag = f"🎯 Spot Close {spot_dec_str}"
+    elif fut_close_has_70_75:
+        decimal_match_tag = f"⚡ Future Close {fut_dec_str}"
+    elif spot_intra_has_70_75 and fut_intra_has_70_75:
+        decimal_match_tag = "📍 Both Spot & Fut Intraday (High/Low)"
+    elif spot_intra_has_70_75:
+        sh_sub = f"High .{spot_h_paise:02d}" if spot_h_paise in (70, 75) else ""
+        sl_sub = f"Low .{spot_l_paise:02d}" if spot_l_paise in (70, 75) else ""
+        sub_str = f"{sh_sub} {sl_sub}".strip()
+        decimal_match_tag = f"📍 Spot Intraday ({sub_str})"
+    elif fut_intra_has_70_75:
+        fh_sub = f"High .{fut_h_paise:02d}" if fut_h_paise in (70, 75) else ""
+        fl_sub = f"Low .{fut_l_paise:02d}" if fut_l_paise in (70, 75) else ""
+        sub_str = f"{fh_sub} {fl_sub}".strip()
+        decimal_match_tag = f"📍 Future Intraday ({sub_str})"
+    else:
+        decimal_match_tag = f"Spot {spot_dec_str} | Fut {fut_dec_str}"
     
     return {
         "spot_close": spot_c,
@@ -178,10 +215,16 @@ def calculate_spot_and_future_pricing(
         "close_vs_1h_range_tag": close_vs_1h_tag,
         "is_close_1h_strong_70": is_close_1h_strong_70,
         "is_close_1h_strong_75": is_close_1h_strong_75,
-        # Exact .70 / .75 Decimal Precision
-        "has_decimal_70_75": has_decimal_70_75,
-        "spot_decimal": spot_decimal,
-        "fut_decimal": fut_decimal,
+        # Exact .70 / .75 Decimal Precision (Spot & Future)
+        "has_decimal_70_75": has_exact_decimal_70_75,
+        "has_exact_decimal_70_75": has_exact_decimal_70_75,
+        "has_close_decimal_70_75": has_close_decimal_70_75,
+        "has_intra_decimal_70_75": has_intra_decimal_70_75,
+        "spot_close_has_70_75": spot_close_has_70_75,
+        "fut_close_has_70_75": fut_close_has_70_75,
+        "spot_decimal": spot_dec_str,
+        "fut_decimal": fut_dec_str,
+        "decimal_match_tag": decimal_match_tag,
         # Future parameters
         "fut_close": fut_c,
         "fut_high": fut_h,
@@ -1149,8 +1192,12 @@ def fetch_universe_data_v2(
             "Is_Close_1H_Strong_70": pricing["is_close_1h_strong_70"],
             "Is_Close_1H_Strong_75": pricing["is_close_1h_strong_75"],
             "Has_Decimal_70_75": pricing["has_decimal_70_75"],
+            "Has_Exact_Decimal_70_75": pricing["has_exact_decimal_70_75"],
+            "Has_Close_Decimal_70_75": pricing["has_close_decimal_70_75"],
+            "Has_Intra_Decimal_70_75": pricing["has_intra_decimal_70_75"],
             "Spot_Decimal": pricing["spot_decimal"],
             "Fut_Decimal": pricing["fut_decimal"],
+            "Decimal_Match_Tag": pricing["decimal_match_tag"],
             "Fut_LTP": pricing["fut_close"],
             "Fut_Close": pricing["fut_close"],
             "Fut_High": pricing["fut_high"],
@@ -1332,6 +1379,74 @@ def fetch_universe_data_v2(
     return df_out, meta
 
 
+def ensure_decimal_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Guarantees all exact .70 / .75 decimal tick columns exist even on cached DataFrames.
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+    if "Has_Exact_Decimal_70_75" not in out.columns:
+        spot_close = out["Spot_Close"] if "Spot_Close" in out.columns else (out["LTP"] if "LTP" in out.columns else pd.Series(0.0, index=out.index))
+        fut_close = out["Fut_Close"] if "Fut_Close" in out.columns else spot_close
+        spot_h = out["Spot_High"] if "Spot_High" in out.columns else (out["Day_High"] if "Day_High" in out.columns else spot_close)
+        spot_l = out["Spot_Low"] if "Spot_Low" in out.columns else (out["Day_Low"] if "Day_Low" in out.columns else spot_close)
+        fut_h = out["Fut_High"] if "Fut_High" in out.columns else spot_h
+        fut_l = out["Fut_Low"] if "Fut_Low" in out.columns else spot_l
+
+        def check_p(val):
+            try:
+                if pd.isna(val) or val is None:
+                    return False
+                return int(round(float(val) * 100)) % 100 in (70, 75)
+            except Exception:
+                return False
+
+        def get_dec_str(val):
+            try:
+                if pd.isna(val) or val is None:
+                    return ".00"
+                return f".{int(round(float(val) * 100)) % 100:02d}"
+            except Exception:
+                return ".00"
+
+        out["Spot_Decimal"] = spot_close.apply(get_dec_str)
+        out["Fut_Decimal"] = fut_close.apply(get_dec_str)
+
+        has_sc = spot_close.apply(check_p)
+        has_fc = fut_close.apply(check_p)
+        has_sh = spot_h.apply(check_p)
+        has_sl = spot_l.apply(check_p)
+        has_fh = fut_h.apply(check_p)
+        has_fl = fut_l.apply(check_p)
+
+        out["Has_Close_Decimal_70_75"] = has_sc | has_fc
+        out["Has_Intra_Decimal_70_75"] = has_sh | has_sl | has_fh | has_fl
+        out["Has_Exact_Decimal_70_75"] = out["Has_Close_Decimal_70_75"] | out["Has_Intra_Decimal_70_75"]
+        out["Has_Decimal_70_75"] = out["Has_Exact_Decimal_70_75"]
+
+        def make_tag(row):
+            sc = check_p(row.get("Spot_Close", row.get("LTP", 0)))
+            fc = check_p(row.get("Fut_Close", 0))
+            if sc and fc:
+                return f"🔥 Both Spot ({row['Spot_Decimal']}) & Fut ({row['Fut_Decimal']}) Close"
+            elif sc:
+                return f"🎯 Spot Close {row['Spot_Decimal']}"
+            elif fc:
+                return f"⚡ Future Close {row['Fut_Decimal']}"
+            elif check_p(row.get("Spot_High", 0)) or check_p(row.get("Spot_Low", 0)):
+                return "📍 Spot Intraday (.70/.75)"
+            elif check_p(row.get("Fut_High", 0)) or check_p(row.get("Fut_Low", 0)):
+                return "📍 Future Intraday (.70/.75)"
+            return f"Spot {row['Spot_Decimal']} | Fut {row['Fut_Decimal']}"
+
+        if "Decimal_Match_Tag" not in out.columns:
+            out["Decimal_Match_Tag"] = out.apply(make_tag, axis=1)
+
+    return out
+
+
 def apply_screener_v2_filters(
     df: pd.DataFrame,
     bypass_52w_proximity: bool = False,
@@ -1356,7 +1471,7 @@ def apply_screener_v2_filters(
     if df.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), {}
 
-    filtered = df.copy()
+    filtered = ensure_decimal_columns(df.copy())
 
     # 1. 52-Week Proximity constraint (bypassable via bypass_52w_proximity)
     if not bypass_52w_proximity:

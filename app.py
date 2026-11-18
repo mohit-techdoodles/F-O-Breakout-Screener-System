@@ -40,6 +40,7 @@ from screener_engine import (
 )
 from chart_utils import create_breakout_chart
 from mtf_breakout import PINE_SCRIPT_V5_CODE
+from screener_v2_engine import ensure_decimal_columns
 from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
 
 
@@ -1324,30 +1325,26 @@ with tab5:
 with tab6:
     st.subheader(f"All Scanned F&O Stocks ({len(all_df)})")
     
-    with st.expander("🏷️ Spot vs Future Pricing Matrix (Intraday High, Low, Final Market Close & 0.70 / 0.75 Range Position)", expanded=False):
-        st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Tick-Aligned .70, .75 Precision & Day Range Ratio)")
+    with st.expander("🏷️ Spot vs Future Pricing Matrix (Exact .70 / .75 Decimals, Intraday High/Low & Closing)", expanded=False):
+        st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Strict .70 / .75 Decimal Tick Scanner)")
         st.caption("Strict filter view: Displays tick-aligned decimals (.70, .75) for Spot and Future, with separate Intraday Range Location and Closing vs 1H Opening Range Position.")
 
         c_app_f, _ = st.columns([3, 2])
         with c_app_f:
-            app_strict = st.checkbox("Strict Filter: Show only .70 / .75 & 1H Breakouts", value=True, key="chk_app_strict_pricing")
+            app_strict = st.checkbox("🎯 Strict Filter: Show ONLY Exact .70 / .75 Decimals (Spot & Future)", value=True, key="chk_app_strict_pricing")
 
+        all_df = ensure_decimal_columns(all_df)
         if app_strict:
-            app_mask = (
-                (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) |
-                (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70) |
-                (all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
-                (all_df.get("Has_Decimal_70_75", False) == True)
-            )
+            app_mask = all_df["Has_Exact_Decimal_70_75"] if "Has_Exact_Decimal_70_75" in all_df.columns else pd.Series(False, index=all_df.index)
             app_base_df = all_df[app_mask].copy() if not all_df.empty else pd.DataFrame(columns=all_df.columns)
         else:
             app_base_df = all_df.copy()
 
         exp_pricing_cols = [
-            "Symbol", "Spot_Close", "Spot_High", "Spot_Low",
-            "Intra_Range_Pos", "Intra_Range_Tag",
-            "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
-            "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
+            "Symbol", "Spot_Close", "Spot_Decimal", "Fut_Close", "Fut_Decimal", "Decimal_Match_Tag",
+            "One_Hour_Break_Status", "Chg%",
+            "Spot_High", "Spot_Low",
+            "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
             "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
         ]
         available_exp = [c for c in exp_pricing_cols if c in app_base_df.columns]
@@ -1357,11 +1354,10 @@ with tab6:
         st.dataframe(
             exp_p_df.style.format({
                 "Spot_Close": "₹{:.2f}",
+                "Fut_Close": "₹{:.2f}",
+                "Chg%": "{:+.2f}%",
                 "Spot_High": "₹{:.2f}",
                 "Spot_Low": "₹{:.2f}",
-                "Intra_Range_Pos": "{:.2f}",
-                "Close_vs_1H_Range_Pos": "{:.2f}",
-                "Fut_Close": "₹{:.2f}",
                 "Fut_High": "₹{:.2f}",
                 "Fut_Low": "₹{:.2f}",
                 "Fut_Range_Pos": "{:.2f}",
