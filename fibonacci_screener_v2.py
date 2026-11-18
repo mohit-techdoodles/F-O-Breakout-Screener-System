@@ -4,7 +4,7 @@ Advanced Fibonacci & Target Enhancements
 Implements:
 Part I: Advanced Fibonacci & Target Enhancements
   1. Fibonacci Cluster (MTF Confluence) Filter (1H Macro & 15m Micro)
-  2. Fibonacci Extension Breakouts (1.272 & 1.618 Blue Sky targets)
+  2. Fibonacci Extension Breakouts & Breakdowns (1.272 & 1.618 Profit Targets for Upside Breakouts & Downside Breakdowns)
   3. Volume Profile + Golden Pocket Confluence (POC & Top 3 HVNs)
   4. Fibonacci Rejection (Wick) Scanner (15m Candlestick anatomy >= 60% lower wick)
 

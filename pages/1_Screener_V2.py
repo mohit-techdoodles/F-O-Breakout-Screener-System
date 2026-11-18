@@ -997,9 +997,10 @@ with tab_fib:
         1. **Fibonacci Cluster (MTF Confluence) Filter:**
            - Detects institutional support/resistance where 1-Hour Macro and 15-Minute Micro Fibonacci levels align within `±0.5%`.
            - `ABS(1H_Fib_Value - 15m_Fib_Value) <= CONFLUENCE_TOLERANCE_PCT`.
-        2. **Fibonacci Extension Breakouts (1.272 & 1.618):**
-           - Targets for Blue Sky setups breaking out beyond 1.0 (Swing High) with Volume confirmation.
-           - `Ext 1 = Swing_Low + (Range × 1.272)`, `Ext 2 = Swing_Low + (Range × 1.618)`.
+        2. **Fibonacci Extension Breakouts & Breakdowns (1.272 & 1.618):**
+           - Projects 1st (1.272) and 2nd (1.618) profit-booking targets for both bullish breakouts beyond 1.0 (Swing High / Blue Sky) and bearish breakdowns below 0.0 (Swing Low) with volume confirmation.
+           - Upside Breakout Targets: `Ext 1 = Swing_Low + (Range × 1.272)`, `Ext 2 = Swing_Low + (Range × 1.618)`.
+           - Downside Breakdown Targets: `Ext 1 = Swing_High - (Range × 1.272)`, `Ext 2 = Swing_High - (Range × 1.618)`.
         3. **Volume Profile + Golden Pocket Confluence:**
            - Flags 0.618 Golden Pocket alignment with Volume Profile Point of Control (POC) or Top 3 High Volume Nodes (HVNs) within `±0.5%`.
         4. **Fibonacci Rejection (Wick) Scanner:**
