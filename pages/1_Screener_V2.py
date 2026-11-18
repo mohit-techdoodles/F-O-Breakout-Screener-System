@@ -123,36 +123,76 @@ st.markdown("""
         font-weight: 700;
         border: 1px solid rgba(0, 229, 255, 0.35);
     }
-    /* Clean Blue Scrollbar for Data Tables (without duplicate wrappers) */
-    [data-testid="stDataFrame"] *,
-    .dvn-scroller,
-    [data-testid="stTable"] * {
-        scrollbar-color: #3B82F6 rgba(15, 23, 42, 0.6) !important;
-        scrollbar-width: thin !important;
+    /* ========================================================================= */
+    /* ENHANCED TABLE SCROLLBARS: BOTH HORIZONTAL & VERTICAL VISIBLE ON HOVER   */
+    /* ========================================================================= */
+    .stDataFrame,
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrameResizable"],
+    .stDataFrameGlideDataEditor {
+        border-radius: 8px;
+        overflow: visible !important;
     }
-    [data-testid="stDataFrame"] *::-webkit-scrollbar,
-    .dvn-scroller::-webkit-scrollbar,
-    [data-testid="stTable"] *::-webkit-scrollbar {
-        width: 8px !important;
-        height: 8px !important;
+
+    /* WebKit / Blink (Chrome, Edge, Safari) */
+    ::-webkit-scrollbar {
+        -webkit-appearance: none !important;
+        width: 11px !important;
+        height: 11px !important;
+        display: block !important;
     }
-    [data-testid="stDataFrame"] *::-webkit-scrollbar-track,
-    .dvn-scroller::-webkit-scrollbar-track,
-    [data-testid="stTable"] *::-webkit-scrollbar-track {
-        background: rgba(15, 23, 42, 0.6) !important;
-        border-radius: 4px !important;
+    ::-webkit-scrollbar-track {
+        background: #0F172A !important;
+        border-radius: 5px !important;
     }
-    [data-testid="stDataFrame"] *::-webkit-scrollbar-thumb,
-    .dvn-scroller::-webkit-scrollbar-thumb,
-    [data-testid="stTable"] *::-webkit-scrollbar-thumb {
-        background: #3B82F6 !important;
-        border-radius: 4px !important;
-        border: 1px solid rgba(59, 130, 246, 0.4) !important;
+    ::-webkit-scrollbar-thumb {
+        background: rgba(59, 130, 246, 0.5) !important;
+        border-radius: 5px !important;
+        border: 1px solid rgba(15, 23, 42, 0.8) !important;
+        min-width: 25px !important;
+        min-height: 25px !important;
     }
-    [data-testid="stDataFrame"] *::-webkit-scrollbar-thumb:hover,
-    .dvn-scroller::-webkit-scrollbar-thumb:hover,
-    [data-testid="stTable"] *::-webkit-scrollbar-thumb:hover {
+    ::-webkit-scrollbar-thumb:hover {
         background: #60A5FA !important;
+        box-shadow: 0 0 10px rgba(96, 165, 250, 0.9) !important;
+    }
+    ::-webkit-scrollbar-corner {
+        background: #0F172A !important;
+    }
+
+    /* High-contrast vibrant scrollbars inside all Streamlit tables */
+    [data-testid="stDataFrame"] ::-webkit-scrollbar,
+    .stDataFrame ::-webkit-scrollbar,
+    .dvn-scroller::-webkit-scrollbar {
+        -webkit-appearance: none !important;
+        width: 11px !important;
+        height: 11px !important;
+        display: block !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-track,
+    .stDataFrame ::-webkit-scrollbar-track,
+    .dvn-scroller::-webkit-scrollbar-track {
+        background: #0B1120 !important;
+        border-radius: 5px !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb,
+    .stDataFrame ::-webkit-scrollbar-thumb,
+    .dvn-scroller::-webkit-scrollbar-thumb {
+        background: #3B82F6 !important;
+        border-radius: 5px !important;
+        border: 1.5px solid #0F172A !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb:hover,
+    .stDataFrame ::-webkit-scrollbar-thumb:hover,
+    .dvn-scroller::-webkit-scrollbar-thumb:hover {
+        background: #93C5FD !important;
+        box-shadow: 0 0 12px rgba(147, 197, 253, 0.95) !important;
+    }
+
+    /* Firefox standard */
+    * {
+        scrollbar-color: #3B82F6 #0F172A !important;
+        scrollbar-width: thin !important;
     }
     .nav-banner {
         background: linear-gradient(90deg, #1E293B 0%, #0F172A 100%);
@@ -683,21 +723,73 @@ with tab2:
         )
 
     elif tab2_view_mode == "🏷️ Spot vs Future Pricing Matrix (.70/.75 Decimals)":
-        st.caption("⚡ **Spot vs Future Dual Pricing:** Displays exact tick-aligned decimals (.70, .75, etc.) for Spot & Future Close, High, Low, and Range Position ratio ((Close - Low) / (High - Low)).")
+        st.caption("⚡ **Spot vs Future Dual Pricing & 0.70 / 0.75 Decimal Filter:** Evaluates Live Intraday Range Location separately from Closing vs Opening 1-Hour (IB) Range position and breakout direction.")
+
+        # Dedicated Filter Selector: Defaults to strictly showing ONLY 0.70 / 0.75 qualifying stocks
+        c_p_flt, c_p_desc = st.columns([3, 2])
+        with c_p_flt:
+            p_filter_mode = st.selectbox(
+                "🎯 Decimal & Range Filter Mode (Strict View):",
+                [
+                    "🔥 All Qualifying .70 / .75 & 1H Breakouts (Strict - Default)",
+                    "⭐ Elite Range (>= 0.75 Intraday or 1H Close)",
+                    "🟢 Strong Range (>= 0.70 Intraday or 1H Close)",
+                    "🚀 Bullish 1H Breakouts (> 10:15 AM High)",
+                    "🔻 Bearish 1H Breakdowns (< 10:15 AM Low)",
+                    "🪙 Exact .70 / .75 Decimal Tick (NSE Paise)",
+                    "🌐 Show All Scanned Stocks (Unfiltered)"
+                ],
+                index=0,
+                help="By default, this view strictly filters and shows ONLY stocks qualifying for 0.70 or 0.75 range position, 1H breakouts, or exact decimals. Non-qualifying stocks are excluded."
+            )
+
+        # Apply strict filtering
+        if p_filter_mode == "🔥 All Qualifying .70 / .75 & 1H Breakouts (Strict - Default)":
+            p_mask = (
+                (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) |
+                (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70) |
+                (all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
+                (all_df.get("Has_Decimal_70_75", False) == True)
+            )
+        elif p_filter_mode == "⭐ Elite Range (>= 0.75 Intraday or 1H Close)":
+            p_mask = (all_df.get("Intra_Range_Pos", 0.0) >= 0.75) | (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.75)
+        elif p_filter_mode == "🟢 Strong Range (>= 0.70 Intraday or 1H Close)":
+            p_mask = (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) | (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70)
+        elif p_filter_mode == "🚀 Bullish 1H Breakouts (> 10:15 AM High)":
+            p_mask = all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")
+        elif p_filter_mode == "🔻 Bearish 1H Breakdowns (< 10:15 AM Low)":
+            p_mask = all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bearish")
+        elif p_filter_mode == "🪙 Exact .70 / .75 Decimal Tick (NSE Paise)":
+            p_mask = all_df.get("Has_Decimal_70_75", False) == True
+        else:
+            p_mask = pd.Series(True, index=all_df.index)
+
+        pricing_filtered = all_df[p_mask].copy() if not all_df.empty else pd.DataFrame(columns=all_df.columns)
+
+        # Summary Metrics
+        pm1, pm2, pm3, pm4 = st.columns(4)
+        pm1.metric("Qualifying Stocks", len(pricing_filtered), f"of {len(all_df)} scanned")
+        pm2.metric("Intraday Range >= 0.70", int((all_df.get("Intra_Range_Pos", 0.0) >= 0.70).sum()))
+        pm3.metric("1H Bullish Breakouts", int(all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish").sum()))
+        pm4.metric("1H Bearish Breakdowns", int(all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bearish").sum()))
+
         pricing_cols = [
-            "Symbol", "Spot_Close", "Spot_High", "Spot_Low", "Spot_Range_Pos", "Spot_Range_Tag",
+            "Symbol", "Spot_Close", "Spot_High", "Spot_Low",
+            "Intra_Range_Pos", "Intra_Range_Tag",
+            "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
             "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
             "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
         ]
-        available_pricing = [c for c in pricing_cols if c in all_df.columns]
-        pricing_df = all_df[available_pricing].copy() if not all_df.empty else pd.DataFrame(columns=available_pricing)
+        available_pricing = [c for c in pricing_cols if c in pricing_filtered.columns]
+        pricing_df = pricing_filtered[available_pricing].copy() if not pricing_filtered.empty else pd.DataFrame(columns=available_pricing)
 
         st.dataframe(
             pricing_df.style.format({
                 "Spot_Close": "₹{:.2f}",
                 "Spot_High": "₹{:.2f}",
                 "Spot_Low": "₹{:.2f}",
-                "Spot_Range_Pos": "{:.2f}",
+                "Intra_Range_Pos": "{:.2f}",
+                "Close_vs_1H_Range_Pos": "{:.2f}",
                 "Fut_Close": "₹{:.2f}",
                 "Fut_High": "₹{:.2f}",
                 "Fut_Low": "₹{:.2f}",
@@ -712,8 +804,10 @@ with tab2:
                 "Spot_Close": st.column_config.TextColumn("Spot Close", width="small"),
                 "Spot_High": st.column_config.TextColumn("Spot High", width="small"),
                 "Spot_Low": st.column_config.TextColumn("Spot Low", width="small"),
-                "Spot_Range_Pos": st.column_config.NumberColumn("Spot Range Pos", help="Ratio (Close - Low) / (High - Low). >= 0.70/0.75 indicates strong closing.", format="%.2f"),
-                "Spot_Range_Tag": st.column_config.TextColumn("Spot Location", width="medium"),
+                "Intra_Range_Pos": st.column_config.NumberColumn("Intra Range Pos", help="Live intraday position ((LTP - Day Low) / (Day High - Day Low)). >= 0.70/0.75 indicates strong intraday range position.", format="%.2f"),
+                "Intra_Range_Tag": st.column_config.TextColumn("Intra Location", width="medium"),
+                "One_Hour_Break_Status": st.column_config.TextColumn("1H Breakout Status", help="Direction after 10:15 AM: Bullish breakout above 1H High, Bearish breakdown below 1H Low, or Inside range.", width="medium"),
+                "Close_vs_1H_Range_Pos": st.column_config.NumberColumn("Close vs 1H Pos", help="Position relative to 1H range ((Close - 1H Low) / (1H High - 1H Low)). > 1.0 = Bullish Breakout, < 0.0 = Bearish Breakdown.", format="%.2f"),
                 "Fut_Close": st.column_config.TextColumn("Fut Close", width="small"),
                 "Fut_High": st.column_config.TextColumn("Fut High", width="small"),
                 "Fut_Low": st.column_config.TextColumn("Fut Low", width="small"),
@@ -823,21 +917,40 @@ with tab2:
 
     with st.expander("🏷️ Spot vs Future Pricing Matrix (Intraday High, Low, Final Market Close & 0.70 / 0.75 Range Position)", expanded=False):
         st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Tick-Aligned .70, .75 Precision & Day Range Ratio)")
-        st.caption("Displays exact 2-decimal tick-aligned prices (e.g. .70, .75) for BOTH Spot and Future, with Intraday High/Low, Final Market Close, Range Position ((Close - Low) / (High - Low)), and Basis.")
+        st.caption("Strict filter view: Displays tick-aligned decimals (.70, .75) for Spot and Future, with separate Intraday Range Location and Closing vs 1H Opening Range Position.")
+
+        c_exp_f, _ = st.columns([3, 2])
+        with c_exp_f:
+            exp_strict = st.checkbox("Strict Filter: Show only .70 / .75 & 1H Breakouts", value=True, key="chk_exp_strict_pricing")
+
+        if exp_strict:
+            exp_mask = (
+                (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) |
+                (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70) |
+                (all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
+                (all_df.get("Has_Decimal_70_75", False) == True)
+            )
+            exp_base_df = all_df[exp_mask].copy() if not all_df.empty else pd.DataFrame(columns=all_df.columns)
+        else:
+            exp_base_df = all_df.copy()
+
         exp_pricing_cols = [
-            "Symbol", "Spot_Close", "Spot_High", "Spot_Low", "Spot_Range_Pos", "Spot_Range_Tag",
+            "Symbol", "Spot_Close", "Spot_High", "Spot_Low",
+            "Intra_Range_Pos", "Intra_Range_Tag",
+            "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
             "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
             "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
         ]
-        available_exp = [c for c in exp_pricing_cols if c in all_df.columns]
-        exp_p_df = all_df[available_exp].copy() if not all_df.empty else pd.DataFrame(columns=available_exp)
+        available_exp = [c for c in exp_pricing_cols if c in exp_base_df.columns]
+        exp_p_df = exp_base_df[available_exp].copy() if not exp_base_df.empty else pd.DataFrame(columns=available_exp)
 
         st.dataframe(
             exp_p_df.style.format({
                 "Spot_Close": "₹{:.2f}",
                 "Spot_High": "₹{:.2f}",
                 "Spot_Low": "₹{:.2f}",
-                "Spot_Range_Pos": "{:.2f}",
+                "Intra_Range_Pos": "{:.2f}",
+                "Close_vs_1H_Range_Pos": "{:.2f}",
                 "Fut_Close": "₹{:.2f}",
                 "Fut_High": "₹{:.2f}",
                 "Fut_Low": "₹{:.2f}",
@@ -846,7 +959,13 @@ with tab2:
                 "Fut_Basis%": "{:+.2f}%"
             }),
             use_container_width=True,
-            height=380
+            height=380,
+            column_config={
+                "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                "Intra_Range_Pos": st.column_config.NumberColumn("Intra Range Pos", format="%.2f"),
+                "One_Hour_Break_Status": st.column_config.TextColumn("1H Breakout Status", width="medium"),
+                "Close_vs_1H_Range_Pos": st.column_config.NumberColumn("Close vs 1H Pos", format="%.2f")
+            }
         )
 
 
@@ -925,9 +1044,9 @@ with tab_fib:
         st.markdown("##### Part I: Golden Pocket (0.618), MTF Clusters, Extensions, VP Confluence & Wick Rejections")
         p1_cols = [
             "Symbol", "LTP", "Chg%", "Swing_Type_1H", "Fib_0618_1H",
+            "Ext_Target_1", "Ext_Target_2", "Dist_To_Ext_1%", "Ext_Setup_Tag", "Is_Ext_Breakout",
             "Is_Golden_Pocket_Confluence", "Is_Golden_Pocket", "Is_Golden_Zone_Pullback",
             "Is_Cluster_Active", "Cluster_Level_Price", "Cluster_Labels",
-            "Is_Ext_Breakout", "Ext_Target_1", "Ext_Target_2", "Dist_To_Ext_1%", "Ext_Setup_Tag",
             "Vol_Fib_Confluence_Flag", "Confluence_Node_Type", "Confluence_Node_Price",
             "Is_Fib_Rejection", "Rejection_Level", "Rejection_Wick%", "Rejection_Tag"
         ]
@@ -948,17 +1067,34 @@ with tab_fib:
         col_h5.metric("VP + GP Confluence", len(vp_gp_active_df))
         col_h6.metric("15m Wick Rejection", len(wick_active_df))
 
-        st.dataframe(p1_df, use_container_width=True)
+        fmt_p1 = {
+            "LTP": "₹{:.2f}",
+            "Chg%": "{:+.2f}%",
+            "Fib_0618_1H": "₹{:.2f}",
+            "Ext_Target_1": "₹{:.2f}",
+            "Ext_Target_2": "₹{:.2f}",
+            "Dist_To_Ext_1%": "{:+.2f}%",
+            "Cluster_Level_Price": "₹{:.2f}",
+            "Confluence_Node_Price": "₹{:.2f}",
+            "Rejection_Level": "₹{:.2f}",
+            "Rejection_Wick%": "{:.1f}%"
+        }
+        h_p1 = min(460, max(260, 55 + len(p1_df) * 36))
+        st.dataframe(
+            p1_df.style.format({k: v for k, v in fmt_p1.items() if k in p1_df.columns}),
+            use_container_width=True,
+            height=h_p1
+        )
 
     with f_sub2:
         st.markdown("##### Part II: Golden Pivots, Camarilla Traps, Prem/Disc Oscillator & Macro Swings")
         p2_cols = [
-            "Symbol", "LTP", "Chg%",
+            "Symbol", "LTP", "Chg%", "Fib_0618_1H",
+            "Weekly_Fib_Target_1", "Weekly_Fib_Target_2", "Weekly_CPR_Squeeze_Active", "Weekly_Fib_Exp_Bull", "Weekly_Fib_Exp_Bear",
             "Is_Golden_Pivot_Bullish", "Is_Golden_Pivot_Bearish", "Golden_Pivot_Zone",
             "Is_Camarilla_Trap_Bull", "Is_Camarilla_Trap_Bear", "Camarilla_Trap_Level", "Camarilla_Trap_Tag",
             "Prem_Disc_Status", "Dist_From_POC_ATR",
             "Is_Macro_Anchor_Bull", "Is_Macro_Anchor_Bear", "Macro_Anchor_Zone", "Macro_Anchor_Tag",
-            "Weekly_CPR_Squeeze_Active", "Weekly_Fib_Exp_Bull", "Weekly_Fib_Exp_Bear", "Weekly_Fib_Target_1", "Weekly_Fib_Target_2",
             "Is_Inside_Week_GP_Bull", "Is_Inside_Week_GP_Bear", "Inside_Week_GP_Status"
         ]
         available_p2_cols = [c for c in p2_cols if c in all_df.columns]
@@ -970,7 +1106,22 @@ with tab_fib:
         col_k3.metric("Macro Anchor Swings", int((all_df.get("Is_Macro_Anchor_Bull", False) | all_df.get("Is_Macro_Anchor_Bear", False)).sum()))
         col_k4.metric("Inside Week @ 0.618", int((all_df.get("Is_Inside_Week_GP_Bull", False) | all_df.get("Is_Inside_Week_GP_Bear", False)).sum()))
 
-        st.dataframe(p2_df, use_container_width=True)
+        fmt_p2 = {
+            "LTP": "₹{:.2f}",
+            "Chg%": "{:+.2f}%",
+            "Fib_0618_1H": "₹{:.2f}",
+            "Weekly_Fib_Target_1": "₹{:.2f}",
+            "Weekly_Fib_Target_2": "₹{:.2f}",
+            "Golden_Pivot_Zone": "₹{:.2f}",
+            "Camarilla_Trap_Level": "₹{:.2f}",
+            "Macro_Anchor_Zone": "₹{:.2f}"
+        }
+        h_p2 = min(460, max(260, 55 + len(p2_df) * 36))
+        st.dataframe(
+            p2_df.style.format({k: v for k, v in fmt_p2.items() if k in p2_df.columns}),
+            use_container_width=True,
+            height=h_p2
+        )
 
     with f_sub3:
         st.markdown("##### Full Universe Advanced Fibonacci Monitor")
@@ -979,7 +1130,8 @@ with tab_fib:
         if sym_search:
             display_fib_df = display_fib_df[display_fib_df["Symbol"].str.contains(sym_search)]
 
-        st.dataframe(display_fib_df, use_container_width=True)
+        h_fib_mon = min(520, max(280, 55 + len(display_fib_df) * 36))
+        st.dataframe(display_fib_df, use_container_width=True, height=h_fib_mon)
 
         csv_fib = display_fib_df.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -1072,7 +1224,8 @@ with tab_swing:
                 "RS_Status", "OI_2D_Change%", "OI_Buildup_2D", "Coiled_Spring_Tag", "Swing_Confluence_Reasons"
             ]
             available_sc_cols = [c for c in sc_cols if c in high_conv_df.columns]
-            st.dataframe(high_conv_df[available_sc_cols], use_container_width=True)
+            h_sc = min(460, max(260, 55 + len(high_conv_df) * 36))
+            st.dataframe(high_conv_df[available_sc_cols], use_container_width=True, height=h_sc)
         else:
             st.info("ℹ️ No stocks currently meet the strict High-Conviction Swing multi-dimensional criteria simultaneously. Check the 'Full Universe Swing Monitor' tab below to view all symbol rankings.")
 
@@ -1086,7 +1239,8 @@ with tab_swing:
                 "BB_Width%", "BB_Width_120_Avg%", "RS_Alpha%", "OI_2D_Change%"
             ]
             available_coil_cols = [c for c in coil_cols if c in coiled_df.columns]
-            st.dataframe(coiled_df[available_coil_cols], use_container_width=True)
+            h_coil = min(460, max(260, 55 + len(coiled_df) * 36))
+            st.dataframe(coiled_df[available_coil_cols], use_container_width=True, height=h_coil)
         else:
             st.info("ℹ️ No symbols currently in NR7 or BB Squeeze compression state.")
 
@@ -1099,7 +1253,8 @@ with tab_swing:
         ]
         available_mon_cols = [c for c in sw_monitor_cols if c in all_df.columns]
         mon_df = all_df[available_mon_cols].copy() if not all_df.empty else pd.DataFrame(columns=sw_monitor_cols)
-        st.dataframe(mon_df, use_container_width=True)
+        h_mon = min(520, max(280, 55 + len(mon_df) * 36))
+        st.dataframe(mon_df, use_container_width=True, height=h_mon)
 
         csv_sw = mon_df.to_csv(index=False).encode("utf-8")
         st.download_button(

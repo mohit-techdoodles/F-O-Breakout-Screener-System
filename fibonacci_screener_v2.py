@@ -145,12 +145,13 @@ def calculate_extension_breakouts(
     swing_low: float,
     ltp: float,
     curr_vol: float,
-    avg_vol: float
+    avg_vol: float,
+    swing_type: str = "Neutral"
 ) -> Tuple[bool, float, float, float, str]:
     """
-    Point 2: Fibonacci Extension Breakouts (1.272 & 1.618)
+    Point 2: Fibonacci Extension Breakouts & Downside Breakdowns (1.272 & 1.618)
     Calculates forward-looking price targets for assets breaking out beyond 1.0 (Swing High)
-    or down beyond 0.0 (Swing Low) tracking pure momentum (Blue Sky setups).
+    or breaking down below 0.0 (Swing Low) tracking pure momentum.
     Bullish Trigger: Close > Swing_High AND Current_Volume > Avg_Volume
     Bearish Trigger: Close < Swing_Low AND Current_Volume > Avg_Volume
     """
@@ -158,26 +159,39 @@ def calculate_extension_breakouts(
         return False, np.nan, np.nan, 0.0, "None"
 
     r = swing_high - swing_low
-    # Bullish forward extensions
+    # Bullish forward extensions (above Swing High)
     ext_1_bull = swing_low + (r * 1.272)
     ext_2_bull = swing_low + (r * 1.618)
 
-    # Bearish forward extensions
+    # Bearish forward extensions (below Swing Low)
     ext_1_bear = swing_high - (r * 1.272)
     ext_2_bear = swing_high - (r * 1.618)
 
     vol_confirmed = curr_vol > avg_vol if avg_vol > 0 else True
 
-    if ltp > swing_high and vol_confirmed:
-        dist_pct = ((ext_1_bull - ltp) / ltp * 100.0) if ltp > 0 else 0.0
-        return True, round(ext_1_bull, 2), round(ext_2_bull, 2), round(dist_pct, 2), "Bullish Blue Sky"
-    elif ltp < swing_low and vol_confirmed:
+    # 1. Active Breakdown below Swing Low
+    if ltp < swing_low:
         dist_pct = ((ltp - ext_1_bear) / ltp * 100.0) if ltp > 0 else 0.0
-        return True, round(ext_1_bear, 2), round(ext_2_bear, 2), round(dist_pct, 2), "Bearish Extension"
-    else:
-        # Default projected levels
+        tag = "Bearish Extension" if vol_confirmed else "Bearish Breakdown (Low Vol)"
+        return bool(vol_confirmed), round(ext_1_bear, 2), round(ext_2_bear, 2), round(dist_pct, 2), tag
+
+    # 2. Active Breakout above Swing High
+    elif ltp > swing_high:
         dist_pct = ((ext_1_bull - ltp) / ltp * 100.0) if ltp > 0 else 0.0
-        return False, round(ext_1_bull, 2), round(ext_2_bull, 2), round(dist_pct, 2), "None"
+        tag = "Bullish Blue Sky" if vol_confirmed else "Bullish Breakout (Low Vol)"
+        return bool(vol_confirmed), round(ext_1_bull, 2), round(ext_2_bull, 2), round(dist_pct, 2), tag
+
+    # 3. Inside Range: Project target based on directional trend (swing_type / price location)
+    else:
+        mid_point = (swing_high + swing_low) / 2.0
+        is_bearish = (swing_type == "Bearish") or (ltp < mid_point and swing_type != "Bullish")
+        
+        if is_bearish:
+            dist_pct = ((ltp - ext_1_bear) / ltp * 100.0) if ltp > 0 else 0.0
+            return False, round(ext_1_bear, 2), round(ext_2_bear, 2), round(dist_pct, 2), "Bearish Target"
+        else:
+            dist_pct = ((ext_1_bull - ltp) / ltp * 100.0) if ltp > 0 else 0.0
+            return False, round(ext_1_bull, 2), round(ext_2_bull, 2), round(dist_pct, 2), "Bullish Target"
 
 
 def calculate_volume_profile_and_hvns(df_candles: pd.DataFrame, num_bins: int = 70) -> Tuple[float, List[float]]:
@@ -690,7 +704,10 @@ def calculate_weekly_cpr_fib_expansion(
     elif is_exp_bear:
         return True, False, True, round(t1_bear, 2), round(t2_bear, 2)
     else:
-        return is_squeeze, False, False, round(t1_bull, 2), round(t2_bull, 2)
+        if ltp < w_pivot:
+            return is_squeeze, False, False, round(t1_bear, 2), round(t2_bear, 2)
+        else:
+            return is_squeeze, False, False, round(t1_bull, 2), round(t2_bull, 2)
 
 
 def calculate_inside_week_gp_compression(
@@ -921,10 +938,10 @@ def calculate_fibonacci_v2_enhancements(
     default_res["cluster_level_price"] = cl_price
     default_res["cluster_labels"] = cl_lbls
 
-    # Point 2: Extension Breakouts
+    # Point 2: Extension Breakouts & Downside Breakdowns
     curr_v = float(curr_candles["Volume"].iloc[-1]) if not curr_candles.empty else 0.0
     avg_v = float(df_1h["Volume"].iloc[-20:].mean()) if len(df_1h) >= 5 else 0.0
-    is_ext, ext_1, ext_2, dist_ext, ext_tag = calculate_extension_breakouts(sh_1h, sl_1h, ltp, curr_v, avg_v)
+    is_ext, ext_1, ext_2, dist_ext, ext_tag = calculate_extension_breakouts(sh_1h, sl_1h, ltp, curr_v, avg_v, swing_type=st_1h)
     default_res["is_ext_breakout"] = is_ext
     default_res["ext_target_1"] = ext_1
     default_res["ext_target_2"] = ext_2

@@ -84,9 +84,76 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-    .stDataFrame {
+    .stDataFrame,
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrameResizable"],
+    .stDataFrameGlideDataEditor {
         border-radius: 8px;
-        overflow: hidden;
+        overflow: visible !important;
+    }
+    /* ========================================================================= */
+    /* ENHANCED TABLE SCROLLBARS: BOTH HORIZONTAL & VERTICAL VISIBLE ON HOVER   */
+    /* ========================================================================= */
+    /* Global scrollbar styling (disables macOS auto-hide overlay behavior) */
+    ::-webkit-scrollbar {
+        -webkit-appearance: none !important;
+        width: 11px !important;
+        height: 11px !important;
+        display: block !important;
+    }
+    ::-webkit-scrollbar-track {
+        background: #0F172A !important;
+        border-radius: 5px !important;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(59, 130, 246, 0.5) !important;
+        border-radius: 5px !important;
+        border: 1px solid rgba(15, 23, 42, 0.8) !important;
+        min-width: 25px !important;
+        min-height: 25px !important;
+        transition: background 0.15s ease, box-shadow 0.15s ease !important;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: #60A5FA !important;
+        box-shadow: 0 0 10px rgba(96, 165, 250, 0.9) !important;
+    }
+    ::-webkit-scrollbar-corner {
+        background: #0F172A !important;
+    }
+
+    /* Target Glide Data Grid scroller & Streamlit DataFrame elements */
+    [data-testid="stDataFrame"] ::-webkit-scrollbar,
+    .stDataFrame ::-webkit-scrollbar,
+    .dvn-scroller::-webkit-scrollbar {
+        -webkit-appearance: none !important;
+        width: 11px !important;
+        height: 11px !important;
+        display: block !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-track,
+    .stDataFrame ::-webkit-scrollbar-track,
+    .dvn-scroller::-webkit-scrollbar-track {
+        background: #0B1120 !important;
+        border-radius: 5px !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb,
+    .stDataFrame ::-webkit-scrollbar-thumb,
+    .dvn-scroller::-webkit-scrollbar-thumb {
+        background: #3B82F6 !important;
+        border-radius: 5px !important;
+        border: 1.5px solid #0F172A !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb:hover,
+    .stDataFrame ::-webkit-scrollbar-thumb:hover,
+    .dvn-scroller::-webkit-scrollbar-thumb:hover {
+        background: #93C5FD !important;
+        box-shadow: 0 0 12px rgba(147, 197, 253, 0.95) !important;
+    }
+
+    /* Firefox standard */
+    * {
+        scrollbar-color: #3B82F6 #0F172A !important;
+        scrollbar-width: thin !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -631,9 +698,11 @@ with tab1:
                 subset=["% Above VAH", "% From 52W High"]
             )
         
+        h_bull = min(500, max(260, 55 + len(display_bull) * 36))
         st.dataframe(
             styler,
             **get_width_kw(st.dataframe),
+            height=h_bull,
             hide_index=True
         )
 
@@ -739,9 +808,11 @@ with tab2:
                 subset=["% Below VAL", "% From 52W Low"]
             )
         
+        h_bear = min(500, max(260, 55 + len(display_bear) * 36))
         st.dataframe(
             styler,
             **get_width_kw(st.dataframe),
+            height=h_bear,
             hide_index=True
         )
 
@@ -779,6 +850,7 @@ with tab_mtf:
                 "MTF_1H_Status": "1H Status",
                 "MTF_VWAP_Status": "VWAP Status"
             })
+            h_mbull = min(460, max(250, 55 + len(display_m_bull) * 36))
             st.dataframe(
                 display_m_bull.style.format({
                     "LTP (₹)": "₹{:.2f}",
@@ -789,6 +861,7 @@ with tab_mtf:
                     "% vs VWAP": "{:+.2f}%"
                 }),
                 **get_width_kw(st.dataframe),
+                height=h_mbull,
                 hide_index=True
             )
 
@@ -809,6 +882,7 @@ with tab_mtf:
                 "MTF_1H_Status": "1H Status",
                 "MTF_VWAP_Status": "VWAP Status"
             })
+            h_mbear = min(460, max(250, 55 + len(display_m_bear) * 36))
             st.dataframe(
                 display_m_bear.style.format({
                     "LTP (₹)": "₹{:.2f}",
@@ -819,6 +893,7 @@ with tab_mtf:
                     "% vs VWAP": "{:+.2f}%"
                 }),
                 **get_width_kw(st.dataframe),
+                height=h_mbear,
                 hide_index=True
             )
 
@@ -841,6 +916,7 @@ with tab_mtf:
         "VWAP": "VWAP ₹",
         "Dist_VWAP%": "% vs VWAP"
     })
+    h_mtf_all = min(520, max(280, 55 + len(display_mtf_all) * 36))
     st.dataframe(
         display_mtf_all.style.format({
             "LTP (₹)": "₹{:.2f}",
@@ -853,6 +929,7 @@ with tab_mtf:
             "% vs VWAP": "{:+.2f}%"
         }),
         **get_width_kw(st.dataframe),
+        height=h_mtf_all,
         hide_index=True
     )
 
@@ -907,6 +984,7 @@ with tab_fib:
                 f_status: "Fibonacci Status",
                 "Opt_C_Status": "Option C Status"
             })
+            h_gp = min(460, max(250, 55 + len(display_gp) * 36))
             st.dataframe(
                 display_gp.style.format({
                     "LTP (₹)": "₹{:.2f}",
@@ -916,6 +994,7 @@ with tab_fib:
                     "Target 2 [-0.618] ₹": "₹{:.2f}"
                 }),
                 **get_width_kw(st.dataframe),
+                height=h_gp,
                 hide_index=True
             )
 
@@ -951,6 +1030,7 @@ with tab_fib:
         f_status: "Fibonacci Setup Status"
     })
 
+    h_fib_all = min(520, max(280, 55 + len(display_fib_all) * 36))
     st.dataframe(
         display_fib_all.style.format({
             "LTP (₹)": "₹{:.2f}",
@@ -964,6 +1044,7 @@ with tab_fib:
             "Retrace %": "{:.1f}%"
         }),
         **get_width_kw(st.dataframe),
+        height=h_fib_all,
         hide_index=True
     )
 
@@ -1052,6 +1133,7 @@ with tab3:
             "BBW_Contract_Status": "BBW Contraction"
         })
 
+        h_tomorrow = min(500, max(260, 55 + len(disp_tomorrow) * 36))
         st.dataframe(
             disp_tomorrow.style.format({
                 "Today Close / LTP (₹)": "₹{:.2f}",
@@ -1065,6 +1147,7 @@ with tab3:
                 "Today RVOL": "{:.2f}x"
             }),
             **get_width_kw(st.dataframe),
+            height=h_tomorrow,
             hide_index=True
         )
 
@@ -1108,6 +1191,7 @@ with tab4:
             "CPR_Status": "CPR Status"
         })
         
+        h_sq = min(500, max(260, 55 + len(disp_squeeze) * 36))
         st.dataframe(
             disp_squeeze.style.format({
                 "LTP (₹)": "₹{:.2f}",
@@ -1120,6 +1204,7 @@ with tab4:
                 "RVOL": "{:.2f}x"
             }),
             **get_width_kw(st.dataframe),
+            height=h_sq,
             hide_index=True
         )
 
@@ -1241,21 +1326,41 @@ with tab6:
     
     with st.expander("🏷️ Spot vs Future Pricing Matrix (Intraday High, Low, Final Market Close & 0.70 / 0.75 Range Position)", expanded=False):
         st.markdown("##### 🏷️ Spot vs Future Dual Pricing (Tick-Aligned .70, .75 Precision & Day Range Ratio)")
-        st.caption("Displays exact 2-decimal tick-aligned prices (e.g. .70, .75) for BOTH Spot and Future, with Intraday High/Low, Final Market Close, Range Position ((Close - Low) / (High - Low)), and Basis.")
+        st.caption("Strict filter view: Displays tick-aligned decimals (.70, .75) for Spot and Future, with separate Intraday Range Location and Closing vs 1H Opening Range Position.")
+
+        c_app_f, _ = st.columns([3, 2])
+        with c_app_f:
+            app_strict = st.checkbox("Strict Filter: Show only .70 / .75 & 1H Breakouts", value=True, key="chk_app_strict_pricing")
+
+        if app_strict:
+            app_mask = (
+                (all_df.get("Intra_Range_Pos", 0.0) >= 0.70) |
+                (all_df.get("Close_vs_1H_Range_Pos", 0.0) >= 0.70) |
+                (all_df.get("One_Hour_Break_Status", "").astype(str).str.contains("Bullish")) |
+                (all_df.get("Has_Decimal_70_75", False) == True)
+            )
+            app_base_df = all_df[app_mask].copy() if not all_df.empty else pd.DataFrame(columns=all_df.columns)
+        else:
+            app_base_df = all_df.copy()
+
         exp_pricing_cols = [
-            "Symbol", "Spot_Close", "Spot_High", "Spot_Low", "Spot_Range_Pos", "Spot_Range_Tag",
+            "Symbol", "Spot_Close", "Spot_High", "Spot_Low",
+            "Intra_Range_Pos", "Intra_Range_Tag",
+            "One_Hour_Break_Status", "Close_vs_1H_Range_Pos",
             "Fut_Close", "Fut_High", "Fut_Low", "Fut_Range_Pos", "Fut_Range_Tag",
             "Fut_Basis", "Fut_Basis%", "Days_To_Expiry"
         ]
-        available_exp = [c for c in exp_pricing_cols if c in all_df.columns]
-        exp_p_df = all_df[available_exp].copy() if not all_df.empty else pd.DataFrame(columns=available_exp)
+        available_exp = [c for c in exp_pricing_cols if c in app_base_df.columns]
+        exp_p_df = app_base_df[available_exp].copy() if not app_base_df.empty else pd.DataFrame(columns=available_exp)
 
+        h_exp = min(500, max(260, 55 + len(exp_p_df) * 36))
         st.dataframe(
             exp_p_df.style.format({
                 "Spot_Close": "₹{:.2f}",
                 "Spot_High": "₹{:.2f}",
                 "Spot_Low": "₹{:.2f}",
-                "Spot_Range_Pos": "{:.2f}",
+                "Intra_Range_Pos": "{:.2f}",
+                "Close_vs_1H_Range_Pos": "{:.2f}",
                 "Fut_Close": "₹{:.2f}",
                 "Fut_High": "₹{:.2f}",
                 "Fut_Low": "₹{:.2f}",
@@ -1264,6 +1369,7 @@ with tab6:
                 "Fut_Basis%": "{:+.2f}%"
             }),
             **get_width_kw(st.dataframe),
+            height=h_exp,
             hide_index=True
         )
 
@@ -1287,6 +1393,7 @@ with tab6:
         "Cam_Status", "BB_Status", "BB_Bandwidth%", "52W_High", "Dist_52W_High%"
     ]].copy()
 
+    h_all = min(560, max(300, 55 + len(display_all) * 36))
     st.dataframe(
         display_all.style.format({
             "LTP": "₹{:.2f}",
@@ -1312,6 +1419,7 @@ with tab6:
             "Dist_52W_High%": "{:+.2f}%"
         }),
         **get_width_kw(st.dataframe),
+        height=h_all,
         hide_index=True
     )
 

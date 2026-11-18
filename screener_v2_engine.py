@@ -37,12 +37,20 @@ def calculate_spot_and_future_pricing(
     spot_high: float,
     spot_low: float,
     spot_close: Optional[float] = None,
-    r_rate: float = 0.065
+    r_rate: float = 0.065,
+    ib_high: Optional[float] = None,
+    ib_low: Optional[float] = None,
+    ib_close: Optional[float] = None,
+    is_opt_c_breakin: bool = False
 ) -> Dict[str, Any]:
     """
     Computes exact 2-decimal NSE tick-aligned prices (.70, .75, etc.) for BOTH Spot and Future:
-    - Spot: Final Market Close, Intraday High, Intraday Low, and Range Position ratio (0.00 to 1.00)
-    - Future: Futures Final Market Close, Futures Intraday High, Futures Intraday Low, Range Position ratio, and Basis (₹ and %)
+    - 1. Live Intraday Range Location (0.00 to 1.00): Position within today's live high-low range
+    - 2. Closing vs Opening 1-Hour (IB 09:15-10:15 AM) Position & Breakout Status:
+         Tracks whether after the initial 1-Hour window, price broke out above 1H High (Bullish),
+         broke down below 1H Low (Bearish), or traded inside the 1H range.
+    - 3. Strict .70 / .75 Decimal Precision: Identifies stocks trading at or ending in .70 / .75 decimals.
+    - 4. Future: Cost of Carry model, Futures High, Low, Range Position ratio, and Basis (₹ and %)
     """
     tz = ZoneInfo("Asia/Kolkata")
     now = datetime.datetime.now(tz)
@@ -71,10 +79,65 @@ def calculate_spot_and_future_pricing(
     spot_h = round_nse_tick(max(spot_high, spot_c))
     spot_l = round_nse_tick(min(spot_low, spot_c))
     
-    # Intraday Range Location (0.00 to 1.00 - e.g. 0.70 or 0.75)
+    # 1. Live Intraday Range Location (0.00 to 1.00 - e.g. 0.70 or 0.75)
     spot_range = max(0.05, spot_h - spot_l)
-    spot_range_pos = round(max(0.0, min(1.0, (spot_c - spot_l) / spot_range)), 2)
-    
+    intra_range_pos = round(max(0.0, min(1.0, (spot_c - spot_l) / spot_range)), 2)
+    intra_range_tag = (
+        "🔥 Top 25% (>= 0.75)" if intra_range_pos >= 0.75 else (
+            "🟢 Top 30% (>= 0.70)" if intra_range_pos >= 0.70 else (
+                "🔴 Bottom 30% (<= 0.30)" if intra_range_pos <= 0.30 else "⚪ Neutral"
+            )
+        )
+    )
+    is_intra_strong_70 = bool(intra_range_pos >= 0.70)
+    is_intra_strong_75 = bool(intra_range_pos >= 0.75)
+
+    # 2. Closing vs Opening 1-Hour (IB 09:15-10:15 AM) Position & Breakout/Breakdown Direction
+    if ib_high is not None and ib_low is not None and not np.isnan(ib_high) and not np.isnan(ib_low) and ib_high > ib_low:
+        ib_range = max(0.05, ib_high - ib_low)
+        close_vs_1h_pos = round((spot_c - ib_low) / ib_range, 2)
+        if spot_c > ib_high:
+            one_hour_break_status = "🚀 Bullish 1H Breakout (> 1H High)"
+            one_hour_break_tag = "Bullish"
+            close_vs_1h_tag = "🚀 Bullish Breakout (> 1H High)"
+            is_close_1h_strong_70 = True
+            is_close_1h_strong_75 = True
+        elif spot_c < ib_low:
+            one_hour_break_status = "🔻 Bearish 1H Breakdown (< 1H Low)"
+            one_hour_break_tag = "Bearish"
+            close_vs_1h_tag = "🔻 Bearish Breakdown (< 1H Low)"
+            is_close_1h_strong_70 = False
+            is_close_1h_strong_75 = False
+        else:
+            if is_opt_c_breakin:
+                one_hour_break_status = "🔄 1H Range Break-in"
+            else:
+                one_hour_break_status = "📦 Inside 1H Range"
+            one_hour_break_tag = "Inside"
+            if close_vs_1h_pos >= 0.75:
+                close_vs_1h_tag = "🔥 1H Top 25% (>= 0.75)"
+                is_close_1h_strong_70 = True
+                is_close_1h_strong_75 = True
+            elif close_vs_1h_pos >= 0.70:
+                close_vs_1h_tag = "🟢 1H Top 30% (>= 0.70)"
+                is_close_1h_strong_70 = True
+                is_close_1h_strong_75 = False
+            elif close_vs_1h_pos <= 0.30:
+                close_vs_1h_tag = "🔴 1H Bottom 30% (<= 0.30)"
+                is_close_1h_strong_70 = False
+                is_close_1h_strong_75 = False
+            else:
+                close_vs_1h_tag = "⚪ Inside 1H Range"
+                is_close_1h_strong_70 = False
+                is_close_1h_strong_75 = False
+    else:
+        one_hour_break_status = "⏳ 1H Pending (< 10:15)"
+        one_hour_break_tag = "Neutral"
+        close_vs_1h_pos = intra_range_pos
+        close_vs_1h_tag = intra_range_tag
+        is_close_1h_strong_70 = is_intra_strong_70
+        is_close_1h_strong_75 = is_intra_strong_75
+
     # Standard Cost of Carry model for near-month NSE F&O
     coc_factor = 1.0 + (r_rate * (days_to_expiry / 365.0))
     fut_c = round_nse_tick(spot_c * coc_factor)
@@ -87,17 +150,39 @@ def calculate_spot_and_future_pricing(
     basis_pts = round_nse_tick(fut_c - spot_c)
     basis_pct = round(((fut_c - spot_c) / spot_c) * 100.0, 2) if spot_c > 0 else 0.0
 
-    spot_range_tag = "🔥 Top 25% (>= 0.75)" if spot_range_pos >= 0.75 else ("🟢 Top 30% (>= 0.70)" if spot_range_pos >= 0.70 else ("🔴 Bottom 30% (<= 0.30)" if spot_range_pos <= 0.30 else "⚪ Neutral"))
     fut_range_tag = "🔥 Top 25% (>= 0.75)" if fut_range_pos >= 0.75 else ("🟢 Top 30% (>= 0.70)" if fut_range_pos >= 0.70 else ("🔴 Bottom 30% (<= 0.30)" if fut_range_pos <= 0.30 else "⚪ Neutral"))
+
+    # 3. Exact .70 / .75 decimal detection
+    spot_decimal = round(spot_c % 1.0, 2)
+    fut_decimal = round(fut_c % 1.0, 2)
+    has_decimal_70_75 = bool(spot_decimal in (0.70, 0.75) or fut_decimal in (0.70, 0.75))
     
     return {
         "spot_close": spot_c,
         "spot_high": spot_h,
         "spot_low": spot_l,
-        "spot_range_pos": spot_range_pos,
-        "spot_range_tag": spot_range_tag,
-        "is_spot_strong_close_70": bool(spot_range_pos >= 0.70),
-        "is_spot_strong_close_75": bool(spot_range_pos >= 0.75),
+        # Backward-compatible keys
+        "spot_range_pos": intra_range_pos,
+        "spot_range_tag": intra_range_tag,
+        "is_spot_strong_close_70": is_intra_strong_70,
+        "is_spot_strong_close_75": is_intra_strong_75,
+        # Explicit Intraday Separation
+        "intra_range_pos": intra_range_pos,
+        "intra_range_tag": intra_range_tag,
+        "is_intra_strong_70": is_intra_strong_70,
+        "is_intra_strong_75": is_intra_strong_75,
+        # Explicit Closing vs 1H Separation & 1H Breakout/Breakdown Direction
+        "one_hour_break_status": one_hour_break_status,
+        "one_hour_break_tag": one_hour_break_tag,
+        "close_vs_1h_range_pos": close_vs_1h_pos,
+        "close_vs_1h_range_tag": close_vs_1h_tag,
+        "is_close_1h_strong_70": is_close_1h_strong_70,
+        "is_close_1h_strong_75": is_close_1h_strong_75,
+        # Exact .70 / .75 Decimal Precision
+        "has_decimal_70_75": has_decimal_70_75,
+        "spot_decimal": spot_decimal,
+        "fut_decimal": fut_decimal,
+        # Future parameters
         "fut_close": fut_c,
         "fut_high": fut_h,
         "fut_low": fut_l,
@@ -946,14 +1031,6 @@ def fetch_universe_data_v2(
         prev_close = float(prev_candles[close_col].iloc[-1])
         chg_pct = ((ltp - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
 
-        # Spot & Future Dual Pricing (Tick-aligned decimals .70, .75, etc.)
-        pricing = calculate_spot_and_future_pricing(
-            spot_ltp=ltp,
-            spot_high=day_high,
-            spot_low=day_low,
-            spot_close=ltp
-        )
-
         # Store in-memory caches for instant zero-latency chart rendering
         intraday_cache[sym] = sub_intra
         if not sub_1y.empty:
@@ -963,6 +1040,18 @@ def fetch_universe_data_v2(
         prev_h = float(prev_candles[high_col].max())
         prev_l = float(prev_candles[low_col].min())
         mtf_info = calculate_mtf_v2(sub_intra, pdh_fallback=prev_h, pdl_fallback=prev_l)
+
+        # Spot & Future Dual Pricing (Tick-aligned decimals .70, .75, separate Intraday vs 1H Closing)
+        pricing = calculate_spot_and_future_pricing(
+            spot_ltp=ltp,
+            spot_high=day_high,
+            spot_low=day_low,
+            spot_close=ltp,
+            ib_high=mtf_info.get("ib_high"),
+            ib_low=mtf_info.get("ib_low"),
+            ib_close=mtf_info.get("ib_close"),
+            is_opt_c_breakin=mtf_info.get("opt_c_breakin", False)
+        )
 
         # Pre-resample sub_1y to Weekly once for both Section 3 and Section 4 (huge speed gain)
         df_w = None
@@ -1048,6 +1137,20 @@ def fetch_universe_data_v2(
             "Spot_Range_Tag": pricing["spot_range_tag"],
             "Is_Spot_Strong_70": pricing["is_spot_strong_close_70"],
             "Is_Spot_Strong_75": pricing["is_spot_strong_close_75"],
+            # Explicit Intraday vs 1H Closing Separation & Breakout Direction
+            "Intra_Range_Pos": pricing["intra_range_pos"],
+            "Intra_Range_Tag": pricing["intra_range_tag"],
+            "Is_Intra_Strong_70": pricing["is_intra_strong_70"],
+            "Is_Intra_Strong_75": pricing["is_intra_strong_75"],
+            "One_Hour_Break_Status": pricing["one_hour_break_status"],
+            "One_Hour_Break_Tag": pricing["one_hour_break_tag"],
+            "Close_vs_1H_Range_Pos": pricing["close_vs_1h_range_pos"],
+            "Close_vs_1H_Range_Tag": pricing["close_vs_1h_range_tag"],
+            "Is_Close_1H_Strong_70": pricing["is_close_1h_strong_70"],
+            "Is_Close_1H_Strong_75": pricing["is_close_1h_strong_75"],
+            "Has_Decimal_70_75": pricing["has_decimal_70_75"],
+            "Spot_Decimal": pricing["spot_decimal"],
+            "Fut_Decimal": pricing["fut_decimal"],
             "Fut_LTP": pricing["fut_close"],
             "Fut_Close": pricing["fut_close"],
             "Fut_High": pricing["fut_high"],
@@ -1435,13 +1538,19 @@ def apply_screener_v2_filters(
         cond_swing_bull = pd.Series(True, index=filtered.index)
         cond_swing_bear = pd.Series(True, index=filtered.index)
 
-    # 8. Section 6: Intraday Decimal Range Position Filter (Close in upper 0.70 / 0.75 of day)
-    if range_pos_filter == "Strong Close (>= 0.70 Range)":
-        cond_range = filtered["Is_Spot_Strong_70"] if "Is_Spot_Strong_70" in filtered else pd.Series(True, index=filtered.index)
-    elif range_pos_filter == "Elite Close (>= 0.75 Range)":
-        cond_range = filtered["Is_Spot_Strong_75"] if "Is_Spot_Strong_75" in filtered else pd.Series(True, index=filtered.index)
-    elif range_pos_filter == "Weak Close (<= 0.30 Range)":
-        cond_range = (filtered["Spot_Range_Pos"] <= 0.30) if "Spot_Range_Pos" in filtered else pd.Series(True, index=filtered.index)
+    # 8. Section 6: Intraday & 1H Range Position Filter (0.70 / 0.75 & 1H Breakouts)
+    if range_pos_filter in ("Strong Close (>= 0.70 Range)", "🟢 Strong Range (>= 0.70)"):
+        cond_range = (filtered.get("Is_Intra_Strong_70", False) | filtered.get("Is_Close_1H_Strong_70", False)) if "Is_Intra_Strong_70" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter in ("Elite Close (>= 0.75 Range)", "⭐ Elite Range (>= 0.75)"):
+        cond_range = (filtered.get("Is_Intra_Strong_75", False) | filtered.get("Is_Close_1H_Strong_75", False)) if "Is_Intra_Strong_75" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter in ("Weak Close (<= 0.30 Range)", "🔴 Weak Range (<= 0.30)"):
+        cond_range = (filtered["Intra_Range_Pos"] <= 0.30) if "Intra_Range_Pos" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "🚀 1H Bullish Breakout (> 1H High)":
+        cond_range = filtered["One_Hour_Break_Status"].astype(str).str.contains("Bullish") if "One_Hour_Break_Status" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "🔻 1H Bearish Breakdown (< 1H Low)":
+        cond_range = filtered["One_Hour_Break_Status"].astype(str).str.contains("Bearish") if "One_Hour_Break_Status" in filtered else pd.Series(True, index=filtered.index)
+    elif range_pos_filter == "🪙 Exact .70 / .75 Decimals":
+        cond_range = filtered["Has_Decimal_70_75"] if "Has_Decimal_70_75" in filtered else pd.Series(True, index=filtered.index)
     elif range_pos_filter == "Fut Strong Close (>= 0.70 Range)":
         cond_range = filtered["Is_Fut_Strong_70"] if "Is_Fut_Strong_70" in filtered else pd.Series(True, index=filtered.index)
     elif range_pos_filter == "Fut Elite Close (>= 0.75 Range)":

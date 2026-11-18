@@ -9,28 +9,27 @@ import streamlit.components.v1 as components
 def inject_pwa_headers():
     """
     Injects PWA metadata, manifest link, apple-touch-icon, and service worker registration into Streamlit HTML.
+    Also injects high-contrast persistent custom scrollbar CSS and mobile touch responsiveness directly into the top-level parent DOM.
     """
     pwa_html = """
     <script>
     (function() {
-        // Only inject once into the top-level document
         try {
             var doc = window.parent.document;
+
+            // Link PWA Manifest and Icons (once)
             if (!doc.getElementById('pwa-manifest-link')) {
-                // Link Manifest
                 var link = doc.createElement('link');
                 link.id = 'pwa-manifest-link';
                 link.rel = 'manifest';
                 link.href = 'app/static/manifest.json';
                 doc.head.appendChild(link);
 
-                // Apple Touch Icon
                 var appleIcon = doc.createElement('link');
                 appleIcon.rel = 'apple-touch-icon';
                 appleIcon.href = 'app/static/apple-touch-icon.png';
                 doc.head.appendChild(appleIcon);
 
-                // Apple Web App Capable Meta
                 var metaCapable = doc.createElement('meta');
                 metaCapable.name = 'apple-mobile-web-app-capable';
                 metaCapable.content = 'yes';
@@ -46,20 +45,133 @@ def inject_pwa_headers():
                 metaTitle.content = 'F&O Screener';
                 doc.head.appendChild(metaTitle);
 
-                // Theme color
                 var metaTheme = doc.createElement('meta');
                 metaTheme.name = 'theme-color';
                 metaTheme.content = '#00E676';
                 doc.head.appendChild(metaTheme);
 
-                // Service Worker Registration
                 if ('serviceWorker' in window.parent.navigator) {
                     window.parent.navigator.serviceWorker.register('app/static/sw.js')
                         .catch(function(e) { /* ignore */ });
                 }
             }
+
+            // Unconditionally inject or update Custom High-Contrast Table Scrollbar & Mobile Responsiveness CSS
+            var scrollStyle = doc.getElementById('custom-table-scrollbar-style');
+            if (!scrollStyle) {
+                scrollStyle = doc.createElement('style');
+                scrollStyle.id = 'custom-table-scrollbar-style';
+                doc.head.appendChild(scrollStyle);
+            }
+            scrollStyle.innerHTML = `
+                /* Prevent Streamlit / Glide Data Grid containers from clipping scrollbars */
+                [data-testid="stDataFrame"],
+                .stDataFrame,
+                [data-testid="stDataFrameResizable"],
+                .stDataFrameGlideDataEditor {
+                    overflow: visible !important;
+                }
+
+                /* WebKit scrollbars (disables macOS auto-hide overlay behavior) */
+                ::-webkit-scrollbar {
+                    -webkit-appearance: none !important;
+                    width: 11px !important;
+                    height: 11px !important;
+                    display: block !important;
+                }
+                ::-webkit-scrollbar-track {
+                    background: #0F172A !important;
+                    border-radius: 5px !important;
+                }
+                ::-webkit-scrollbar-thumb {
+                    background: rgba(59, 130, 246, 0.5) !important;
+                    border-radius: 5px !important;
+                    border: 1px solid rgba(15, 23, 42, 0.8) !important;
+                    min-width: 25px !important;
+                    min-height: 25px !important;
+                }
+                ::-webkit-scrollbar-thumb:hover {
+                    background: #60A5FA !important;
+                    box-shadow: 0 0 10px rgba(96, 165, 250, 0.9) !important;
+                }
+                ::-webkit-scrollbar-corner {
+                    background: #0F172A !important;
+                }
+
+                /* High-contrast vibrant scrollbars inside all Streamlit tables */
+                [data-testid="stDataFrame"] ::-webkit-scrollbar,
+                .stDataFrame ::-webkit-scrollbar,
+                .dvn-scroller::-webkit-scrollbar {
+                    -webkit-appearance: none !important;
+                    width: 11px !important;
+                    height: 11px !important;
+                    display: block !important;
+                }
+                [data-testid="stDataFrame"] ::-webkit-scrollbar-track,
+                .stDataFrame ::-webkit-scrollbar-track,
+                .dvn-scroller::-webkit-scrollbar-track {
+                    background: #0B1120 !important;
+                    border-radius: 5px !important;
+                }
+                [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb,
+                .stDataFrame ::-webkit-scrollbar-thumb,
+                .dvn-scroller::-webkit-scrollbar-thumb {
+                    background: #3B82F6 !important;
+                    border-radius: 5px !important;
+                    border: 1.5px solid #0F172A !important;
+                }
+                [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb:hover,
+                .stDataFrame ::-webkit-scrollbar-thumb:hover,
+                .dvn-scroller::-webkit-scrollbar-thumb:hover {
+                    background: #93C5FD !important;
+                    box-shadow: 0 0 12px rgba(147, 197, 253, 0.95) !important;
+                }
+
+                /* Firefox standards */
+                * {
+                    scrollbar-color: #3B82F6 #0F172A !important;
+                    scrollbar-width: thin !important;
+                }
+
+                /* ========================================================= */
+                /* Mobile, iPad & Tablet Device Responsive Optimizations    */
+                /* ========================================================= */
+                @media (max-width: 768px) {
+                    /* Compact scrollbars for smaller touch viewports */
+                    ::-webkit-scrollbar,
+                    [data-testid="stDataFrame"] ::-webkit-scrollbar,
+                    .stDataFrame ::-webkit-scrollbar,
+                    .dvn-scroller::-webkit-scrollbar {
+                        width: 6px !important;
+                        height: 6px !important;
+                    }
+
+                    /* Native smooth inertial momentum touch swiping */
+                    .dvn-scroller {
+                        -webkit-overflow-scrolling: touch !important;
+                        touch-action: pan-x pan-y !important;
+                    }
+
+                    /* Prevent horizontal page overscroll while preserving table swiping */
+                    body, html {
+                        overflow-x: hidden !important;
+                    }
+
+                    /* Compact metric card spacing for mobile screens */
+                    .metric-card {
+                        padding: 8px 10px !important;
+                        margin-bottom: 8px !important;
+                    }
+                    .metric-val {
+                        font-size: 1.25rem !important;
+                    }
+                    .metric-lbl {
+                        font-size: 0.70rem !important;
+                    }
+                }
+            `;
         } catch (e) {
-            // Sandboxed iframe fallback
+            // Sandboxed fallback
         }
     })();
     </script>

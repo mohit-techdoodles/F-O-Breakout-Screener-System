@@ -9,3 +9,4 @@ textColor = "#FFFFFF"
 enableStaticServing = true
 headless = true
 enableCORS = false
+runOnSave = true

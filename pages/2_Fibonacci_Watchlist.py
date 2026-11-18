@@ -38,14 +38,17 @@ from screener_v2_engine import (
     fetch_intraday_data_v2
 )
 import swing_optimization_filters
+from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
 
 # ----------------- Streamlit Page Configuration -----------------
 st.set_page_config(
-    page_title="Category Watchlist (13 Setups) | F&O Screener",
-    page_icon="📂",
+    page_title="Fibonacci Watchlist (13 Setups) | F&O Screener",
+    page_icon="📐",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+inject_pwa_headers()
 
 # ----------------- Custom Styling -----------------
 st.markdown("""
@@ -107,22 +110,76 @@ st.markdown("""
         font-weight: 600;
         font-size: 0.85rem;
     }
-    /* Blue Table Scrollbar */
-    div[data-testid="stDataFrame"] {
-        scrollbar-color: #3B82F6 #1E293B !important;
-        scrollbar-width: thin !important;
+    /* ========================================================================= */
+    /* ENHANCED TABLE SCROLLBARS: BOTH HORIZONTAL & VERTICAL VISIBLE ON HOVER   */
+    /* ========================================================================= */
+    .stDataFrame,
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrameResizable"],
+    .stDataFrameGlideDataEditor {
+        border-radius: 8px;
+        overflow: visible !important;
     }
-    div[data-testid="stDataFrame"]::-webkit-scrollbar {
-        height: 10px !important;
-        width: 10px !important;
+
+    /* WebKit / Blink (Chrome, Edge, Safari) */
+    ::-webkit-scrollbar {
+        -webkit-appearance: none !important;
+        width: 11px !important;
+        height: 11px !important;
+        display: block !important;
     }
-    div[data-testid="stDataFrame"]::-webkit-scrollbar-track {
-        background: #0E1117 !important;
-        border-radius: 6px !important;
+    ::-webkit-scrollbar-track {
+        background: #0F172A !important;
+        border-radius: 5px !important;
     }
-    div[data-testid="stDataFrame"]::-webkit-scrollbar-thumb {
+    ::-webkit-scrollbar-thumb {
+        background: rgba(59, 130, 246, 0.5) !important;
+        border-radius: 5px !important;
+        border: 1px solid rgba(15, 23, 42, 0.8) !important;
+        min-width: 25px !important;
+        min-height: 25px !important;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: #60A5FA !important;
+        box-shadow: 0 0 10px rgba(96, 165, 250, 0.9) !important;
+    }
+    ::-webkit-scrollbar-corner {
+        background: #0F172A !important;
+    }
+
+    /* High-contrast vibrant scrollbars inside all Streamlit tables */
+    [data-testid="stDataFrame"] ::-webkit-scrollbar,
+    .stDataFrame ::-webkit-scrollbar,
+    .dvn-scroller::-webkit-scrollbar {
+        -webkit-appearance: none !important;
+        width: 11px !important;
+        height: 11px !important;
+        display: block !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-track,
+    .stDataFrame ::-webkit-scrollbar-track,
+    .dvn-scroller::-webkit-scrollbar-track {
+        background: #0B1120 !important;
+        border-radius: 5px !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb,
+    .stDataFrame ::-webkit-scrollbar-thumb,
+    .dvn-scroller::-webkit-scrollbar-thumb {
         background: #3B82F6 !important;
-        border-radius: 6px !important;
+        border-radius: 5px !important;
+        border: 1.5px solid #0F172A !important;
+    }
+    [data-testid="stDataFrame"] ::-webkit-scrollbar-thumb:hover,
+    .stDataFrame ::-webkit-scrollbar-thumb:hover,
+    .dvn-scroller::-webkit-scrollbar-thumb:hover {
+        background: #93C5FD !important;
+        box-shadow: 0 0 12px rgba(147, 197, 253, 0.95) !important;
+    }
+
+    /* Firefox standard */
+    * {
+        scrollbar-color: #3B82F6 #0F172A !important;
+        scrollbar-width: thin !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -131,15 +188,16 @@ st.markdown("""
 # =====================================================================
 # SIDEBAR CONTROLS & DATA INGESTION
 # =====================================================================
-st.sidebar.title("📂 Watchlist Controls")
-st.sidebar.caption("Page 3: Categorized Stock Watchlists across all 13 Institutional Setups")
+st.sidebar.title("📐 Fibonacci Watchlist")
+st.sidebar.caption("Page 3: Institutional Fibonacci, Confluence & Swing Setup Watchlists")
 
 # Navigation links to other pages
 with st.sidebar.expander("🧭 Quick Page Navigation", expanded=False):
     st.markdown("""
     * 🏛️ **[Classic Screener V1](/)**
     * ⚙️ **[Screener V2.0](/1_Screener_V2)**
-    * 📂 **[Category Watchlist (Current)](/2_Category_Watchlist)**
+    * 📐 **[Fibonacci Watchlist (Current)](/2_Fibonacci_Watchlist)**
+    * 🔮 **[Money Zone Watchlist](/3_Money_Zone_Watchlist)**
     """)
 
 # Stock Universe Presets
@@ -275,11 +333,11 @@ categories_data[2] = {
     "desc": "Projects 1st (1.272) and 2nd (1.618) profit-booking targets for both upside Blue Sky breakouts (> 1.0) and downside breakdown trends (< 0.0) with volume confirmation.",
     "df": df_cat2,
     "display_cols": [
-        "Symbol", "LTP", "Chg%", "Ext_Setup_Tag", "Ext_Target_1", "Ext_Target_2", "Dist_To_Ext_1%",
+        "Symbol", "LTP", "Chg%", "Swing_Type_1H", "Fib_0618_1H", "Ext_Target_1", "Ext_Target_2", "Dist_To_Ext_1%", "Ext_Setup_Tag",
         "Spot_Close", "Fut_Close"
     ],
     "fmt": {
-        "LTP": "₹{:.2f}", "Chg%": "{:+.2f}%", "Ext_Target_1": "₹{:.2f}", "Ext_Target_2": "₹{:.2f}",
+        "LTP": "₹{:.2f}", "Chg%": "{:+.2f}%", "Fib_0618_1H": "₹{:.2f}", "Ext_Target_1": "₹{:.2f}", "Ext_Target_2": "₹{:.2f}",
         "Dist_To_Ext_1%": "{:+.2f}%", "Spot_Close": "₹{:.2f}", "Fut_Close": "₹{:.2f}"
     }
 }
@@ -415,11 +473,11 @@ categories_data[9] = {
     "desc": "Extreme weekly volatility compression (Weekly CPR < 0.5% width) projecting targets +1.272 / +1.618 on upside breakout, or -0.272 / -0.618 on downside breakdown.",
     "df": df_cat9,
     "display_cols": [
-        "Symbol", "LTP", "Chg%", "Weekly_CPR_Width%", "Weekly_Fib_Target_1", "Weekly_Fib_Target_2",
+        "Symbol", "LTP", "Chg%", "Fib_0618_1H", "Weekly_Fib_Target_1", "Weekly_Fib_Target_2", "Weekly_CPR_Width%",
         "Spot_Close", "Fut_Close"
     ],
     "fmt": {
-        "LTP": "₹{:.2f}", "Chg%": "{:+.2f}%", "Weekly_CPR_Width%": "{:.3f}%",
+        "LTP": "₹{:.2f}", "Chg%": "{:+.2f}%", "Fib_0618_1H": "₹{:.2f}", "Weekly_CPR_Width%": "{:.3f}%",
         "Weekly_Fib_Target_1": "₹{:.2f}", "Weekly_Fib_Target_2": "₹{:.2f}",
         "Spot_Close": "₹{:.2f}", "Fut_Close": "₹{:.2f}"
     }
@@ -508,9 +566,9 @@ categories_data[13] = {
 # =====================================================================
 # MAIN PAGE HEADER & CONTROLS
 # =====================================================================
-st.title("📂 13 Category Stock Watchlist Monitor")
+st.title("📐 Fibonacci & Swing Watchlist Monitor")
 st.markdown(
-    f"Dedicated list view tracking all **{len(raw_df)}** scanned F&O stocks classified across **all 13 institutional setup categories** "
+    f"Dedicated list view tracking all **{len(raw_df)}** scanned F&O stocks classified across **all 13 Fibonacci, Confluence & Swing setup categories** "
     f"(Advanced Fibonacci, High Beta Confluences, and Swing Trade Optimizations)."
 )
 
@@ -644,10 +702,11 @@ for cat_num in categories_to_display:
             # Format dictionary
             fmt = {k: v for k, v in c_info["fmt"].items() if k in view_sub_df.columns}
 
+            h_cat = min(420, max(260, 55 + len(view_sub_df) * 36))
             st.dataframe(
                 view_sub_df.style.format(fmt),
                 use_container_width=True,
-                height=min(320, 45 + len(view_sub_df) * 35)
+                height=h_cat
             )
 
             # Export button per category
