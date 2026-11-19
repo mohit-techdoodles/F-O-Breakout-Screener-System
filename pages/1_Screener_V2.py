@@ -18,12 +18,14 @@ import fibonacci_screener_v2
 import mtf_breakout
 import screener_v2_engine
 import swing_optimization_filters
+import head_and_shoulders_scanner
 
 importlib.reload(fo_stocks)
 importlib.reload(fibonacci_screener_v2)
 importlib.reload(mtf_breakout)
 importlib.reload(screener_v2_engine)
 importlib.reload(swing_optimization_filters)
+importlib.reload(head_and_shoulders_scanner)
 
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
@@ -32,10 +34,14 @@ from screener_v2_engine import (
     fetch_intraday_data_v2,
     apply_screener_v2_filters,
     calculate_mtf_v2,
-    ensure_decimal_columns
+    ensure_decimal_columns,
+    safe_bool_series
 )
 from mtf_breakout import PINE_SCRIPT_V5_CODE
 from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
+
+# Globally available helper for safe boolean indexing on DataFrames
+_get_bool_s = safe_bool_series
 
 # ----------------- Page Configuration -----------------
 st.set_page_config(
@@ -467,12 +473,17 @@ def get_v2_data(syms, tf, b_key):
         benchmark_name=b_key
     )
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_classical_patterns_cached(syms_tuple: tuple, order_param: int) -> pd.DataFrame:
+    return head_and_shoulders_scanner.scan_classical_patterns_1h(list(syms_tuple), order=order_param)
+
 # Refresh Buttons
 c_ref1, c_ref2 = st.sidebar.columns([3, 1])
 with c_ref1:
     if st.button("🔄 Refresh Data", use_container_width=True):
         get_intraday_data_cached.clear()
         get_v2_data.clear()
+        get_classical_patterns_cached.clear()
 with c_ref2:
     if st.button("⚡ Reset", help="Hard reset all caches including 1Y Daily data"):
         st.cache_data.clear()
@@ -679,6 +690,7 @@ with tab1:
 
     csv_data = view_df.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Export MTF Data (CSV)", csv_data, "mtf_screener_v2.csv", "text/csv")
+    st.info("💡 **1-Hour Classical Pattern Alert:** Looking for institutional top and bottom reversals? Head & Shoulders and Inverse H&S formations with dynamic sloped necklines and measured-move targets are actively scanned in **Tab 4 ➔ Part III: 🏛️ 1H Classical Patterns**.")
 
 
 # =====================================================================
@@ -745,16 +757,6 @@ with tab2:
                 index=0,
                 help="By default, strictly displays ONLY stocks whose Spot or Future price ends in exact .70 or .75 decimal paise."
             )
-
-        # Safe helper to extract boolean Series avoiding KeyError scalar indexing
-        def _get_bool_s(d: pd.DataFrame, col_name: str) -> pd.Series:
-            if col_name in d.columns:
-                s = d[col_name]
-                return s.fillna(False).astype(bool) if hasattr(s, "fillna") else pd.Series(False, index=d.index)
-            if "LTP" in d.columns:
-                p_col = d["Spot_Close"] if "Spot_Close" in d.columns else d["LTP"]
-                return p_col.apply(lambda p: int(round(float(p) * 100)) % 100 in (70, 75))
-            return pd.Series(False, index=d.index)
 
         # Apply strict filtering
         if p_filter_mode == "🎯 Exact .70 / .75 Decimals (Spot or Future - Strict)":
@@ -1041,9 +1043,10 @@ with tab_fib:
     st.markdown("#### 📐 Advanced Fibonacci Retracement & High Beta F&O Confluence Engine")
     st.caption("Module: `Fibonacci_Screener_V2` | Implements Multi-Timeframe (MTF) clustering, Blue Sky extensions, Volume Profile confluence, and institutional price action.")
 
-    f_sub1, f_sub2, f_sub3 = st.tabs([
+    f_sub1, f_sub2, f_sub_hs, f_sub3 = st.tabs([
         "Part I: Advanced Fibonacci (Points 1-4)",
         "Part II: High Beta F&O Confluences (Points 5-10)",
+        "Part III: 🏛️ 1H Classical Patterns: Head & Shoulders & Inverse H&S",
         "Full Fibonacci Screener Monitor & CSV Export"
     ])
 
@@ -1129,6 +1132,143 @@ with tab_fib:
             use_container_width=True,
             height=h_p2
         )
+
+    with f_sub_hs:
+        st.markdown("##### Part III: 🏛️ 1-Hour Classical Price Action Patterns (Head & Shoulders & Inverse H&S)")
+        st.caption("Automated quantitative detection of institutional reversal formations on 1-Hour OHLCV data. Evaluates Head prominence, shoulder symmetry, dynamic sloped necklines, volume-confirmed breakdowns/breakouts, and measured-move price targets.")
+
+        # Controls & Filter Row
+        c_hs1, c_hs2, c_hs3, c_hs_btn = st.columns([2, 2, 2, 1])
+        with c_hs1:
+            hs_dir_filter = st.selectbox(
+                "🎯 Pattern Direction:",
+                [
+                    "All Patterns (Bullish & Bearish)",
+                    "🔻 Bearish Head & Shoulders (Tops)",
+                    "🚀 Bullish Inverse Head & Shoulders (Bottoms)"
+                ],
+                index=0,
+                key="sel_hs_dir"
+            )
+        with c_hs2:
+            hs_stat_filter = st.selectbox(
+                "⚡ Signal Status:",
+                [
+                    "All Signals (Breakouts, Breakdowns & Forming)",
+                    "🔥 Confirmed Breakouts / Breakdowns Only",
+                    "👀 Forming Only (Watch Neckline)"
+                ],
+                index=0,
+                key="sel_hs_stat"
+            )
+        with c_hs3:
+            hs_order = st.selectbox(
+                "🔍 Swing Sensitivity (Lookback Order):",
+                [3, 4, 5],
+                index=0,
+                help="Requires N hourly candles on both sides of each peak. 3 = Sensitive / Responsive intraday (~1 day); 5 = Multi-day structural (~1.5-2 days).",
+                key="sel_hs_order"
+            )
+        with c_hs_btn:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Scan 1H", help="Refresh 1H Classical Pattern Detection", use_container_width=True, key="btn_rescan_hs"):
+                get_classical_patterns_cached.clear()
+
+        with st.spinner(f"Analyzing 1-Hour structural peaks, dynamic necklines & measured targets for {len(selected_symbols)} F&O symbols..."):
+            hs_raw_df = get_classical_patterns_cached(tuple(selected_symbols), hs_order)
+
+        hs_filtered = hs_raw_df.copy() if not hs_raw_df.empty else pd.DataFrame()
+        if not hs_filtered.empty:
+            if hs_dir_filter == "🔻 Bearish Head & Shoulders (Tops)":
+                hs_filtered = hs_filtered[hs_filtered["Direction"] == "Bearish"]
+            elif hs_dir_filter == "🚀 Bullish Inverse Head & Shoulders (Bottoms)":
+                hs_filtered = hs_filtered[hs_filtered["Direction"] == "Bullish"]
+
+            if hs_stat_filter == "🔥 Confirmed Breakouts / Breakdowns Only":
+                hs_filtered = hs_filtered[hs_filtered["Status"].str.contains("BREAK", case=False, na=False)]
+            elif hs_stat_filter == "👀 Forming Only (Watch Neckline)":
+                hs_filtered = hs_filtered[hs_filtered["Status"].str.contains("FORMING", case=False, na=False)]
+
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        n_total = len(hs_raw_df) if not hs_raw_df.empty else 0
+        n_confirmed = int(hs_raw_df["Status"].str.contains("BREAK", case=False, na=False).sum()) if not hs_raw_df.empty else 0
+        n_forming = int(hs_raw_df["Status"].str.contains("FORMING", case=False, na=False).sum()) if not hs_raw_df.empty else 0
+        max_rr = float(hs_raw_df["R_R"].max()) if not hs_raw_df.empty else 0.0
+
+        col_m1.metric("Total 1H Patterns", n_total, f"Across {len(selected_symbols)} Scanned")
+        col_m2.metric("⚡ Confirmed Breaks", n_confirmed, "Neckline Triggered")
+        col_m3.metric("👀 Forming (Watchlist)", n_forming, "Approaching Neckline")
+        col_m4.metric("⭐ Top Risk-to-Reward", f"{max_rr:.1f}x" if max_rr > 0 else "0.0x", "Reward vs Risk")
+
+        if hs_filtered.empty:
+            st.info("ℹ️ No active 1H Head & Shoulders or Inverse H&S setups matching the selected criteria. Try adjusting the swing sensitivity order or selecting 'All Patterns'.")
+        else:
+            display_hs_cols = [
+                "Symbol", "Pattern", "Status", "Current_Price", "Neckline_Now",
+                "Target", "Stop_Loss_RS", "Move_Pct", "R_R",
+                "LS_Price", "Head_Price", "RS_Price", "Pattern_Height",
+                "Bars_Since_RS", "Signal_Time"
+            ]
+            avail_hs_cols = [c for c in display_hs_cols if c in hs_filtered.columns]
+            table_hs_df = hs_filtered[avail_hs_cols].copy()
+
+            h_hs_tbl = min(500, max(260, 55 + len(table_hs_df) * 38))
+            st.dataframe(
+                table_hs_df.style.format({
+                    "Current_Price": "₹{:.2f}",
+                    "Neckline_Now": "₹{:.2f}",
+                    "Target": "₹{:.2f}",
+                    "Stop_Loss_RS": "₹{:.2f}",
+                    "Move_Pct": "{:.2f}%",
+                    "R_R": "{:.2f}x",
+                    "LS_Price": "₹{:.2f}",
+                    "Head_Price": "₹{:.2f}",
+                    "RS_Price": "₹{:.2f}",
+                    "Pattern_Height": "₹{:.2f}"
+                }),
+                use_container_width=True,
+                height=h_hs_tbl,
+                column_config={
+                    "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                    "Pattern": st.column_config.TextColumn("Pattern Structure", width="medium"),
+                    "Status": st.column_config.TextColumn("Breakout / Breakdown Status", width="medium"),
+                    "Current_Price": st.column_config.TextColumn("LTP ₹", width="small"),
+                    "Neckline_Now": st.column_config.TextColumn("Neckline ₹", help="Live projected price level of the dynamic sloped neckline.", width="small"),
+                    "Target": st.column_config.TextColumn("Target ₹", help="Measured-move target: Neckline - Pattern Height (Bearish) or Neckline + Pattern Height (Bullish).", width="small"),
+                    "Stop_Loss_RS": st.column_config.TextColumn("Stop Loss (RS) ₹", help="Invalidation level anchored strictly to the Right Shoulder peak.", width="small"),
+                    "Move_Pct": st.column_config.TextColumn("Projected Move %", width="small"),
+                    "R_R": st.column_config.TextColumn("Risk-Reward", help="Reward-to-Risk ratio: (Current Price - Target) / (Stop Loss - Current Price).", width="small"),
+                }
+            )
+
+            # CSV Download
+            csv_hs = table_hs_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Export 1H Head & Shoulders Setups (CSV)",
+                data=csv_hs,
+                file_name=f"1H_Head_And_Shoulders_Setups_{base_meta.get('live_date', 'today')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+        with st.expander("📖 1-Hour Classical Patterns: Technical Architecture & Execution Rules"):
+            st.markdown(r"""
+            #### 1. Bearish Head & Shoulders (Institutional Top Reversal)
+            - **Left Shoulder (LS):** Buyers push price up to a local peak followed by an initial corrective trough ($T_1$).
+            - **Head (H):** A stronger rally pushes price above the Left Shoulder making a new high, followed by a second pullback ($T_2$).
+            - **Right Shoulder (RS):** Buyers attempt another rally but exhaust below the Head. This lower high proves institutional distribution.
+            - **Dynamic Sloped Neckline:** Line connecting $T_1$ and $T_2$ projected forward:
+              $$\text{Neckline}(x) = T_1 + \frac{T_2 - T_1}{T_{2\text{ idx}} - T_{1\text{ idx}}} \times (x - T_{1\text{ idx}})$$
+            - **Measured Move Target:** $\text{Target} = \text{Neckline} - (H - \text{Neckline}_H)$
+            - **Invalidation & Stop Loss:** Anchored strictly to the Right Shoulder high. If price closes above RS, the bearish pattern is completely invalidated.
+
+            #### 2. Bullish Inverse Head & Shoulders (Institutional Bottom Reversal)
+            - **Left Shoulder (LS):** Sellers drive price down to a trough followed by an initial relief bounce ($P_1$).
+            - **Head (H):** A deeper selloff makes a new swing low, followed by a second relief bounce ($P_2$).
+            - **Right Shoulder (RS):** Sellers try to push down again but fail to make a lower low, confirming supply exhaustion.
+            - **Measured Move Target:** $\text{Target} = \text{Neckline} + (\text{Neckline}_H - H)$
+            - **Invalidation & Stop Loss:** Anchored strictly to the Right Shoulder low.
+            """)
 
     with f_sub3:
         st.markdown("##### Full Universe Advanced Fibonacci Monitor")

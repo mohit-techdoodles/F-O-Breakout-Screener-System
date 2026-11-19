@@ -1447,6 +1447,22 @@ def ensure_decimal_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def safe_bool_series(d: pd.DataFrame, col_name: str) -> pd.Series:
+    """
+    Safely extract a boolean Series from DataFrame, avoiding KeyError or scalar indexing issues.
+    Falls back to calculating exact .70/.75 decimals if column is missing.
+    """
+    if d is None or d.empty:
+        return pd.Series(dtype=bool)
+    if col_name in d.columns:
+        s = d[col_name]
+        return s.fillna(False).astype(bool) if hasattr(s, "fillna") else pd.Series(False, index=d.index)
+    if "LTP" in d.columns:
+        p_col = d["Spot_Close"] if "Spot_Close" in d.columns else d["LTP"]
+        return p_col.apply(lambda p: int(round(float(p) * 100)) % 100 in (70, 75))
+    return pd.Series(False, index=d.index)
+
+
 def apply_screener_v2_filters(
     df: pd.DataFrame,
     bypass_52w_proximity: bool = False,
