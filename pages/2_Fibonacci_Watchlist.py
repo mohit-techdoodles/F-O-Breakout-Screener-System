@@ -281,7 +281,7 @@ def get_v2_data(syms, tf, b_key):
 # Refresh Buttons
 c_ref1, c_ref2 = st.sidebar.columns([3, 1])
 with c_ref1:
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    if st.button("🔄 Refresh Data", width="stretch"):
         get_intraday_data_cached.clear()
         get_v2_data.clear()
 with c_ref2:
@@ -705,7 +705,7 @@ for cat_num in categories_to_display:
             h_cat = min(420, max(260, 55 + len(view_sub_df) * 36))
             st.dataframe(
                 view_sub_df.style.format(fmt),
-                use_container_width=True,
+                width="stretch",
                 height=h_cat
             )
 
@@ -753,7 +753,7 @@ if master_records:
             data=master_df.to_csv(index=False).encode("utf-8"),
             file_name=f"all_13_categories_watchlist_{datetime.date.today()}.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
     with c_m2:
         st.write(f"Total qualified instances across all 13 categories: **{len(master_df)} records** across **{master_df['Symbol'].nunique()} unique stocks**.")

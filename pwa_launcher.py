@@ -176,7 +176,10 @@ def inject_pwa_headers():
     })();
     </script>
     """
-    components.html(pwa_html, height=0, width=0)
+    if hasattr(st, "iframe"):
+        st.iframe(pwa_html, height=1, width="stretch")
+    else:
+        components.html(pwa_html, height=0, width=0)
 
 
 def render_app_launcher_sidebar():

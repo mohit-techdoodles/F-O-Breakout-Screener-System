@@ -9,6 +9,7 @@ import importlib
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
+import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
@@ -19,6 +20,7 @@ import mtf_breakout
 import screener_v2_engine
 import swing_optimization_filters
 import head_and_shoulders_scanner
+import rs_calculator
 
 importlib.reload(fo_stocks)
 importlib.reload(fibonacci_screener_v2)
@@ -26,6 +28,7 @@ importlib.reload(mtf_breakout)
 importlib.reload(screener_v2_engine)
 importlib.reload(swing_optimization_filters)
 importlib.reload(head_and_shoulders_scanner)
+importlib.reload(rs_calculator)
 
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
@@ -226,7 +229,7 @@ with st.container():
         """, unsafe_allow_html=True)
     with col_nav2:
         try:
-            st.page_link("app.py", label="🏛️ Switch to Classic Screener V1", icon="🔙", use_container_width=True)
+            st.page_link("app.py", label="🏛️ Switch to Classic Screener V1", icon="🔙", width="stretch")
         except Exception:
             st.markdown("[🏛️ **Switch to Classic Screener V1**](/)")
 
@@ -477,13 +480,23 @@ def get_v2_data(syms, tf, b_key):
 def get_classical_patterns_cached(syms_tuple: tuple, order_param: int) -> pd.DataFrame:
     return head_and_shoulders_scanner.scan_classical_patterns_1h(list(syms_tuple), order=order_param)
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_sector_rs_ranking_cached() -> pd.DataFrame:
+    try:
+        aligned = rs_calculator.fetch_aligned_sector_closes(period="2y")
+        res = rs_calculator.compute_relative_strength(aligned)
+        return res["ranking_table"]
+    except Exception:
+        return pd.DataFrame()
+
 # Refresh Buttons
 c_ref1, c_ref2 = st.sidebar.columns([3, 1])
 with c_ref1:
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    if st.button("🔄 Refresh Data", width="stretch"):
         get_intraday_data_cached.clear()
         get_v2_data.clear()
         get_classical_patterns_cached.clear()
+        get_sector_rs_ranking_cached.clear()
 with c_ref2:
     if st.button("⚡ Reset", help="Hard reset all caches including 1Y Daily data"):
         st.cache_data.clear()
@@ -684,13 +697,14 @@ with tab1:
             "VWAP": "₹{:.2f}",
             "Dist_VWAP%": "{:+.2f}%"
         }),
-        use_container_width=True,
+        width="stretch",
         height=480
     )
 
     csv_data = view_df.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Export MTF Data (CSV)", csv_data, "mtf_screener_v2.csv", "text/csv")
     st.info("💡 **1-Hour Classical Pattern Alert:** Looking for institutional top and bottom reversals? Head & Shoulders and Inverse H&S formations with dynamic sloped necklines and measured-move targets are actively scanned in **Tab 4 ➔ Part III: 🏛️ 1H Classical Patterns**.")
+    st.info("🏛️ **Sector Rotation Alert:** Institutional capital flow & Mansfield Relative Strength across all 13 NSE Sectoral Indices vs Nifty 750 is live in **Page 4 (Sidebar)** and **Tab 5 ➔ Part III: 🏛️ Sector RS vs Nifty 750**.")
 
 
 # =====================================================================
@@ -732,7 +746,7 @@ with tab2:
                 "OI_2D_Change%": "{:+.2f}%",
                 "PCR": "{:.2f}"
             }),
-            use_container_width=True,
+            width="stretch",
             height=450
         )
 
@@ -814,7 +828,7 @@ with tab2:
                 "Fut_Basis": "₹{:+.2f}",
                 "Fut_Basis%": "{:+.2f}%"
             }),
-            use_container_width=True,
+            width="stretch",
             height=450,
             column_config={
                 "Symbol": st.column_config.TextColumn("Symbol", width="small"),
@@ -879,7 +893,7 @@ with tab2:
                 "T-3 Day OI%": "{:+.2f}%",
                 "T-4 Day OI%": "{:+.2f}%"
             }),
-            use_container_width=True,
+            width="stretch",
             height=450
         )
 
@@ -905,7 +919,7 @@ with tab2:
 
         st.dataframe(
             view_fo_df.style.format({k: v for k, v in fmt_dict.items() if k in view_fo_df.columns}),
-            use_container_width=True,
+            width="stretch",
             height=480,
             column_config={
                 "Symbol": st.column_config.TextColumn("Symbol", width="small"),
@@ -967,7 +981,7 @@ with tab2:
                 "Fut_Basis": "₹{:+.2f}",
                 "Fut_Basis%": "{:+.2f}%"
             }),
-            use_container_width=True,
+            width="stretch",
             height=380,
             column_config={
                 "Symbol": st.column_config.TextColumn("Symbol", width="small"),
@@ -1002,7 +1016,7 @@ with tab3:
             "Next_W_VAH": "₹{:.2f}",
             "Next_W_VAL": "₹{:.2f}"
         }),
-        use_container_width=True,
+        width="stretch",
         height=450
     )
 
@@ -1092,7 +1106,7 @@ with tab_fib:
         h_p1 = min(460, max(260, 55 + len(p1_df) * 36))
         st.dataframe(
             p1_df.style.format({k: v for k, v in fmt_p1.items() if k in p1_df.columns}),
-            use_container_width=True,
+            width="stretch",
             height=h_p1
         )
 
@@ -1129,7 +1143,7 @@ with tab_fib:
         h_p2 = min(460, max(260, 55 + len(p2_df) * 36))
         st.dataframe(
             p2_df.style.format({k: v for k, v in fmt_p2.items() if k in p2_df.columns}),
-            use_container_width=True,
+            width="stretch",
             height=h_p2
         )
 
@@ -1171,7 +1185,7 @@ with tab_fib:
             )
         with c_hs_btn:
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            if st.button("🔄 Scan 1H", help="Refresh 1H Classical Pattern Detection", use_container_width=True, key="btn_rescan_hs"):
+            if st.button("🔄 Scan 1H", help="Refresh 1H Classical Pattern Detection", width="stretch", key="btn_rescan_hs"):
                 get_classical_patterns_cached.clear()
 
         with st.spinner(f"Analyzing 1-Hour structural peaks, dynamic necklines & measured targets for {len(selected_symbols)} F&O symbols..."):
@@ -1226,7 +1240,7 @@ with tab_fib:
                     "RS_Price": "₹{:.2f}",
                     "Pattern_Height": "₹{:.2f}"
                 }),
-                use_container_width=True,
+                width="stretch",
                 height=h_hs_tbl,
                 column_config={
                     "Symbol": st.column_config.TextColumn("Symbol", width="small"),
@@ -1248,7 +1262,7 @@ with tab_fib:
                 data=csv_hs,
                 file_name=f"1H_Head_And_Shoulders_Setups_{base_meta.get('live_date', 'today')}.csv",
                 mime="text/csv",
-                use_container_width=True
+                width="stretch"
             )
 
         with st.expander("📖 1-Hour Classical Patterns: Technical Architecture & Execution Rules"):
@@ -1278,7 +1292,7 @@ with tab_fib:
             display_fib_df = display_fib_df[display_fib_df["Symbol"].str.contains(sym_search)]
 
         h_fib_mon = min(520, max(280, 55 + len(display_fib_df) * 36))
-        st.dataframe(display_fib_df, use_container_width=True, height=h_fib_mon)
+        st.dataframe(display_fib_df, width="stretch", height=h_fib_mon)
 
         csv_fib = display_fib_df.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -1286,7 +1300,7 @@ with tab_fib:
             data=csv_fib,
             file_name=f"Fibonacci_Screener_V2_{base_meta.get('live_date', 'today')}.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
 
     # Documentation & Formula Guide
@@ -1354,10 +1368,11 @@ with tab_swing:
         """, unsafe_allow_html=True)
 
     # Sub-views inside Swing Tab
-    sw_sub1, sw_sub2, sw_sub3 = st.tabs([
+    sw_sub1, sw_sub2, sw_sub_sec, sw_sub3 = st.tabs([
         "⭐ High-Conviction Swing Candidates",
         "⚡ Volatility Compression: Coiled Spring (NR7 + BB Squeeze)",
-        "📊 Full Universe Swing Optimization Monitor"
+        "🏛️ Sector RS vs Nifty 750 (Mansfield & Rotation)",
+        "📋 Full Universe Swing Optimization Monitor"
     ])
 
     with sw_sub1:
@@ -1372,7 +1387,7 @@ with tab_swing:
             ]
             available_sc_cols = [c for c in sc_cols if c in high_conv_df.columns]
             h_sc = min(460, max(260, 55 + len(high_conv_df) * 36))
-            st.dataframe(high_conv_df[available_sc_cols], use_container_width=True, height=h_sc)
+            st.dataframe(high_conv_df[available_sc_cols], width="stretch", height=h_sc)
         else:
             st.info("ℹ️ No stocks currently meet the strict High-Conviction Swing multi-dimensional criteria simultaneously. Check the 'Full Universe Swing Monitor' tab below to view all symbol rankings.")
 
@@ -1387,9 +1402,80 @@ with tab_swing:
             ]
             available_coil_cols = [c for c in coil_cols if c in coiled_df.columns]
             h_coil = min(460, max(260, 55 + len(coiled_df) * 36))
-            st.dataframe(coiled_df[available_coil_cols], use_container_width=True, height=h_coil)
+            st.dataframe(coiled_df[available_coil_cols], width="stretch", height=h_coil)
         else:
             st.info("ℹ️ No symbols currently in NR7 or BB Squeeze compression state.")
+
+    with sw_sub_sec:
+        st.markdown("##### 🏛️ Sector Relative Strength vs. Nifty 750 (Institutional Capital Rotation)")
+        st.caption("Benchmark: Nifty Total Market Index (750 stocks). Shows Mansfield RS and 50-day Signal MA status across all 13 NSE Sectoral Indices. Trade long setups whose parent sectors display positive RS tailwinds! Full interactive charts available on Page 4 in the sidebar.")
+        
+        sector_tbl = get_sector_rs_ranking_cached()
+        if not sector_tbl.empty:
+            s_top = sector_tbl.iloc[0]["sector"]
+            s_top_score = sector_tbl.iloc[0]["composite_rs_score"]
+            s_out_cnt = int((sector_tbl["mansfield_rs"] > 0).sum())
+            
+            c_s1, c_s2, c_s3 = st.columns(3)
+            c_s1.metric("🥇 Leading Sector", s_top, f"+{s_top_score:.2f} Composite")
+            c_s2.metric("🚀 Outperforming Sectors", f"{s_out_cnt} / {len(sector_tbl)}", "Mansfield RS > 0")
+            c_s3.metric("📊 Deep-Dive Page", "Page 4: Sector RS", "Available in Sidebar")
+            
+            disp_s_df = sector_tbl.copy()
+            disp_s_df["Trend_Signal"] = disp_s_df["above_signal_ma"].apply(
+                lambda x: "🟢 Above 50 SMA (Bullish)" if x else "🔴 Below 50 SMA (Lagging)"
+            )
+            
+            format_s = {
+                "rs_ratio": "{:.4f}",
+                "mansfield_rs": "{:+.2f}",
+                "composite_rs_score": "{:+.2f}"
+            }
+            for col in disp_s_df.columns:
+                if col.startswith("excess_"):
+                    format_s[col] = "{:+.2f}%"
+            
+            h_s_tbl = min(480, max(260, 50 + len(disp_s_df) * 36))
+            styler_s = disp_s_df.style.format(format_s)
+            try:
+                styler_s = styler_s.background_gradient(
+                    subset=["mansfield_rs", "composite_rs_score"],
+                    cmap="RdYlGn",
+                    vmin=-10,
+                    vmax=10
+                )
+            except Exception:
+                def _c_s(v):
+                    try:
+                        num = float(v)
+                        if num > 0:
+                            return "color: #00E676; font-weight: 600;"
+                        elif num < 0:
+                            return "color: #FF5252; font-weight: 600;"
+                    except Exception:
+                        pass
+                    return ""
+                if hasattr(styler_s, "map"):
+                    styler_s = styler_s.map(_c_s, subset=["mansfield_rs", "composite_rs_score"])
+                elif hasattr(styler_s, "applymap"):
+                    styler_s = styler_s.applymap(_c_s, subset=["mansfield_rs", "composite_rs_score"])
+
+            st.dataframe(
+                styler_s,
+                width="stretch",
+                height=h_s_tbl
+            )
+            
+            csv_sec_bytes = sector_tbl.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Export sector_rs_ranking.csv",
+                data=csv_sec_bytes,
+                file_name="sector_rs_ranking.csv",
+                mime="text/csv",
+                width="stretch"
+            )
+        else:
+            st.info("Loading Sector Relative Strength ranking...")
 
     with sw_sub3:
         st.markdown("##### 📋 Full Universe Swing Optimization Monitor & CSV Export")
@@ -1401,7 +1487,7 @@ with tab_swing:
         available_mon_cols = [c for c in sw_monitor_cols if c in all_df.columns]
         mon_df = all_df[available_mon_cols].copy() if not all_df.empty else pd.DataFrame(columns=sw_monitor_cols)
         h_mon = min(520, max(280, 55 + len(mon_df) * 36))
-        st.dataframe(mon_df, use_container_width=True, height=h_mon)
+        st.dataframe(mon_df, width="stretch", height=h_mon)
 
         csv_sw = mon_df.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -1409,7 +1495,7 @@ with tab_swing:
             data=csv_sw,
             file_name=f"Swing_Optimization_Filters_{base_meta.get('live_date', 'today')}.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
 
     # Strategy Execution Guide
@@ -1530,7 +1616,7 @@ with tab4:
                     margin=dict(l=20, r=20, t=40, b=20),
                     xaxis_rangeslider_visible=False
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
                 if not stock_lookup.empty:
                     s_row = stock_lookup.iloc[0]
