@@ -459,22 +459,131 @@ with tab_stocks:
     st.markdown("#### 🔍 Stock-to-Sector Relative Strength Alignment")
     st.caption("Pair breakout setups with sector leadership tailwinds. High-conviction trades occur when both the stock and its sector outperform Nifty 750.")
 
+    # Comprehensive 180+ active F&O stock-to-sector mapping across 13 sectoral indices
     stock_sector_map = {
-        "INFY": "NIFTY_IT", "TCS": "NIFTY_IT", "HCLTECH": "NIFTY_IT", "WIPRO": "NIFTY_IT", "TECHM": "NIFTY_IT", "COFORGE": "NIFTY_IT",
-        "HDFCBANK": "NIFTY_BANK", "ICICIBANK": "NIFTY_BANK", "KOTAKBANK": "NIFTY_BANK", "AXISBANK": "NIFTY_BANK", "INDUSINDBK": "NIFTY_BANK",
-        "SBIN": "NIFTY_PSU_BANK", "BANKBARODA": "NIFTY_PSU_BANK", "PNB": "NIFTY_PSU_BANK", "CANBK": "NIFTY_PSU_BANK",
-        "BAJFINANCE": "NIFTY_FIN_SERVICE", "BAJAJFINSV": "NIFTY_FIN_SERVICE", "CHOLAFIN": "NIFTY_FIN_SERVICE", "MUTHOOTFIN": "NIFTY_FIN_SERVICE",
-        "MARUTI": "NIFTY_AUTO", "M&M": "NIFTY_AUTO", "BAJAJ-AUTO": "NIFTY_AUTO", "EICHERMOT": "NIFTY_AUTO", "TATAMOTORS": "NIFTY_AUTO", "TVSMOTOR": "NIFTY_AUTO",
-        "TATASTEEL": "NIFTY_METAL", "JSWSTEEL": "NIFTY_METAL", "HINDALCO": "NIFTY_METAL", "JINDALSTEL": "NIFTY_METAL", "VEDL": "NIFTY_METAL",
-        "SUNPHARMA": "NIFTY_PHARMA", "CIPLA": "NIFTY_PHARMA", "DRREDDY": "NIFTY_PHARMA", "DIVISLAB": "NIFTY_PHARMA", "LUPIN": "NIFTY_PHARMA",
-        "ITC": "NIFTY_FMCG", "HINDUNILVR": "NIFTY_FMCG", "NESTLEIND": "NIFTY_FMCG", "BRITANNIA": "NIFTY_FMCG", "TATACONSUM": "NIFTY_FMCG", "DABUR": "NIFTY_FMCG",
-        "RELIANCE": "NIFTY_ENERGY", "ONGC": "NIFTY_ENERGY", "NTPC": "NIFTY_ENERGY", "POWERGRID": "NIFTY_ENERGY", "COALINDIA": "NIFTY_ENERGY", "BPCL": "NIFTY_ENERGY",
+        # NIFTY IT
+        "INFY": "NIFTY_IT", "TCS": "NIFTY_IT", "HCLTECH": "NIFTY_IT", "WIPRO": "NIFTY_IT",
+        "TECHM": "NIFTY_IT", "COFORGE": "NIFTY_IT", "PERSISTENT": "NIFTY_IT", "BSOFT": "NIFTY_IT",
+        "MPHASIS": "NIFTY_IT", "OFSS": "NIFTY_IT", "NAUKRI": "NIFTY_IT", "INDIAMART": "NIFTY_IT",
+        "TATACOMM": "NIFTY_IT",
+        # NIFTY BANK
+        "HDFCBANK": "NIFTY_BANK", "ICICIBANK": "NIFTY_BANK", "KOTAKBANK": "NIFTY_BANK",
+        "AXISBANK": "NIFTY_BANK", "INDUSINDBK": "NIFTY_BANK", "AUBANK": "NIFTY_BANK",
+        "BANDHANBNK": "NIFTY_BANK", "FEDERALBNK": "NIFTY_BANK", "IDFCFIRSTB": "NIFTY_BANK",
+        "RBLBANK": "NIFTY_BANK", "CUB": "NIFTY_BANK",
+        # NIFTY PSU BANK
+        "SBIN": "NIFTY_PSU_BANK", "BANKBARODA": "NIFTY_PSU_BANK", "PNB": "NIFTY_PSU_BANK",
+        "CANBK": "NIFTY_PSU_BANK",
+        # NIFTY FINANCIAL SERVICES
+        "BAJFINANCE": "NIFTY_FIN_SERVICE", "BAJAJFINSV": "NIFTY_FIN_SERVICE", "CHOLAFIN": "NIFTY_FIN_SERVICE",
+        "MUTHOOTFIN": "NIFTY_FIN_SERVICE", "SHRIRAMFIN": "NIFTY_FIN_SERVICE", "PFC": "NIFTY_FIN_SERVICE",
+        "RECLTD": "NIFTY_FIN_SERVICE", "SBICARD": "NIFTY_FIN_SERVICE", "SBILIFE": "NIFTY_FIN_SERVICE",
+        "HDFCLIFE": "NIFTY_FIN_SERVICE", "HDFCAMC": "NIFTY_FIN_SERVICE", "ICICIGI": "NIFTY_FIN_SERVICE",
+        "LICI": "NIFTY_FIN_SERVICE", "LICHSGFIN": "NIFTY_FIN_SERVICE", "M&MFIN": "NIFTY_FIN_SERVICE",
+        "MANAPPURAM": "NIFTY_FIN_SERVICE", "ABCAPITAL": "NIFTY_FIN_SERVICE", "CANFINHOME": "NIFTY_FIN_SERVICE",
+        "LTF": "NIFTY_FIN_SERVICE", "MFSL": "NIFTY_FIN_SERVICE", "MCX": "NIFTY_FIN_SERVICE",
+        "IEX": "NIFTY_FIN_SERVICE",
+        # NIFTY AUTO
+        "MARUTI": "NIFTY_AUTO", "M&M": "NIFTY_AUTO", "BAJAJ-AUTO": "NIFTY_AUTO",
+        "EICHERMOT": "NIFTY_AUTO", "TATAMOTORS": "NIFTY_AUTO", "TVSMOTOR": "NIFTY_AUTO",
+        "HEROMOTOCO": "NIFTY_AUTO", "ASHOKLEY": "NIFTY_AUTO", "BHARATFORG": "NIFTY_AUTO",
+        "BALKRISIND": "NIFTY_AUTO", "APOLLOTYRE": "NIFTY_AUTO", "MRF": "NIFTY_AUTO",
+        "BOSCHLTD": "NIFTY_AUTO", "MOTHERSON": "NIFTY_AUTO", "ESCORTS": "NIFTY_AUTO",
+        "EXIDEIND": "NIFTY_AUTO",
+        # NIFTY METAL
+        "TATASTEEL": "NIFTY_METAL", "JSWSTEEL": "NIFTY_METAL", "HINDALCO": "NIFTY_METAL",
+        "JINDALSTEL": "NIFTY_METAL", "VEDL": "NIFTY_METAL", "SAIL": "NIFTY_METAL",
+        "NMDC": "NIFTY_METAL", "NATIONALUM": "NIFTY_METAL", "HINDCOPPER": "NIFTY_METAL",
+        # NIFTY PHARMA & HEALTHCARE
+        "SUNPHARMA": "NIFTY_PHARMA", "CIPLA": "NIFTY_PHARMA", "DRREDDY": "NIFTY_PHARMA",
+        "DIVISLAB": "NIFTY_PHARMA", "LUPIN": "NIFTY_PHARMA", "AUROPHARMA": "NIFTY_PHARMA",
+        "ALKEM": "NIFTY_PHARMA", "BIOCON": "NIFTY_PHARMA", "GRANULES": "NIFTY_PHARMA",
+        "GLENMARK": "NIFTY_PHARMA", "IPCALAB": "NIFTY_PHARMA", "LAURUSLABS": "NIFTY_PHARMA",
+        "TORNTPHARM": "NIFTY_PHARMA", "ZYDUSLIFE": "NIFTY_PHARMA", "ABBOTINDIA": "NIFTY_PHARMA",
+        "SYNGENE": "NIFTY_PHARMA", "LALPATHLAB": "NIFTY_PHARMA", "METROPOLIS": "NIFTY_PHARMA",
+        "MAXHEALTH": "NIFTY_PHARMA", "APOLLOHOSP": "NIFTY_PHARMA",
+        # NIFTY FMCG
+        "ITC": "NIFTY_FMCG", "HINDUNILVR": "NIFTY_FMCG", "NESTLEIND": "NIFTY_FMCG",
+        "BRITANNIA": "NIFTY_FMCG", "TATACONSUM": "NIFTY_FMCG", "DABUR": "NIFTY_FMCG",
+        "COLPAL": "NIFTY_FMCG", "GODREJCP": "NIFTY_FMCG", "MARICO": "NIFTY_FMCG",
+        "VBL": "NIFTY_FMCG", "UBL": "NIFTY_FMCG", "UNITDSPR": "NIFTY_FMCG",
+        "BALRAMCHIN": "NIFTY_FMCG",
+        # NIFTY ENERGY
+        "RELIANCE": "NIFTY_ENERGY", "ONGC": "NIFTY_ENERGY", "NTPC": "NIFTY_ENERGY",
+        "POWERGRID": "NIFTY_ENERGY", "COALINDIA": "NIFTY_ENERGY", "BPCL": "NIFTY_ENERGY",
+        "IOC": "NIFTY_ENERGY", "HINDPETRO": "NIFTY_ENERGY", "GAIL": "NIFTY_ENERGY",
+        "TATAPOWER": "NIFTY_ENERGY", "IGL": "NIFTY_ENERGY", "MGL": "NIFTY_ENERGY",
+        "PETRONET": "NIFTY_ENERGY",
+        # NIFTY REALTY
         "DLF": "NIFTY_REALTY", "GODREJPROP": "NIFTY_REALTY", "OBEROIRLTY": "NIFTY_REALTY",
+        # NIFTY INFRA & INDUSTRIAL
         "LT": "NIFTY_INFRA", "ULTRACEMCO": "NIFTY_INFRA", "AMBUJACEM": "NIFTY_INFRA",
-        "TITAN": "NIFTY_CONSUMPTION", "TRENT": "NIFTY_CONSUMPTION", "ASIANPAINT": "NIFTY_CONSUMPTION"
+        "ACC": "NIFTY_INFRA", "GRASIM": "NIFTY_INFRA", "DALBHARAT": "NIFTY_INFRA",
+        "SHREECEM": "NIFTY_INFRA", "JKCEMENT": "NIFTY_INFRA", "RAMCOCEM": "NIFTY_INFRA",
+        "INDIACEM": "NIFTY_INFRA", "ADANIPORTS": "NIFTY_INFRA", "GMRAIRPORT": "NIFTY_INFRA",
+        "CONCOR": "NIFTY_INFRA", "BHEL": "NIFTY_INFRA", "SIEMENS": "NIFTY_INFRA",
+        "ABB": "NIFTY_INFRA", "CUMMINSIND": "NIFTY_INFRA", "DELHIVERY": "NIFTY_INFRA",
+        "INDUSTOWER": "NIFTY_INFRA", "HAL": "NIFTY_INFRA", "BEL": "NIFTY_INFRA",
+        "ADANIENT": "NIFTY_INFRA", "BHARTIARTL": "NIFTY_INFRA", "IDEA": "NIFTY_INFRA",
+        "INDIGO": "NIFTY_INFRA",
+        # NIFTY CONSUMPTION
+        "TITAN": "NIFTY_CONSUMPTION", "TRENT": "NIFTY_CONSUMPTION", "ASIANPAINT": "NIFTY_CONSUMPTION",
+        "BERGEPAINT": "NIFTY_CONSUMPTION", "HAVELLS": "NIFTY_CONSUMPTION", "POLYCAB": "NIFTY_CONSUMPTION",
+        "VOLTAS": "NIFTY_CONSUMPTION", "CROMPTON": "NIFTY_CONSUMPTION", "DIXON": "NIFTY_CONSUMPTION",
+        "PVRINOX": "NIFTY_CONSUMPTION", "JUBLFOOD": "NIFTY_CONSUMPTION", "BATAINDIA": "NIFTY_CONSUMPTION",
+        "ABFRL": "NIFTY_CONSUMPTION", "PAGEIND": "NIFTY_CONSUMPTION", "KALYANKJIL": "NIFTY_CONSUMPTION",
+        "INDHOTEL": "NIFTY_CONSUMPTION", "IRCTC": "NIFTY_CONSUMPTION", "SUNTV": "NIFTY_CONSUMPTION",
+        # NIFTY MNC & CHEMICALS
+        "AARTIIND": "NIFTY_MNC", "ATUL": "NIFTY_MNC", "DEEPAKNTR": "NIFTY_MNC",
+        "NAVINFLUOR": "NIFTY_MNC", "PIIND": "NIFTY_MNC", "SRF": "NIFTY_MNC",
+        "TATACHEM": "NIFTY_MNC", "UPL": "NIFTY_MNC", "COROMANDEL": "NIFTY_MNC",
+        "CHAMBLFERT": "NIFTY_MNC", "GNFC": "NIFTY_MNC", "ASTRAL": "NIFTY_MNC",
+        "PIDILITIND": "NIFTY_MNC", "SOLARINDS": "NIFTY_MNC"
     }
 
-    sym_inspect = st.selectbox("Select F&O Symbol:", sorted(list(stock_sector_map.keys())), index=0)
+    all_symbols = sorted(list(stock_sector_map.keys()))
+
+    # Dual Search Box + Dropdown Selector
+    col_search, col_select = st.columns([1, 1])
+
+    with col_search:
+        stk_search_input = st.text_input(
+            "🔍 Search Stock Symbol or Sector:",
+            placeholder="Type symbol or sector e.g. TATA, HDFC, SBIN, RELIANCE, BANK, IT...",
+            key="sec_stk_search_box"
+        ).strip().upper()
+
+    # Dynamic filtering logic: matches stock symbol OR sector name
+    if stk_search_input:
+        filtered_symbols = [
+            s for s in all_symbols
+            if stk_search_input in s or stk_search_input in stock_sector_map.get(s, "").upper()
+        ]
+        if not filtered_symbols:
+            st.caption(f"⚠️ No stock matching `{stk_search_input}`. Showing all {len(all_symbols)} available symbols.")
+            filtered_symbols = all_symbols
+        else:
+            st.caption(f"🎯 Filtered **{len(filtered_symbols)}** symbols matching `{stk_search_input}`")
+    else:
+        filtered_symbols = all_symbols
+
+    with col_select:
+        prev_sym = st.session_state.get("last_selected_sec_stk")
+        if prev_sym in filtered_symbols:
+            def_idx = filtered_symbols.index(prev_sym)
+        elif stk_search_input in filtered_symbols:
+            def_idx = filtered_symbols.index(stk_search_input)
+        else:
+            def_idx = 0
+
+        sym_inspect = st.selectbox(
+            f"📌 Select F&O Symbol ({len(filtered_symbols)} options):",
+            options=filtered_symbols,
+            index=def_idx,
+            key="sec_stk_select_dropdown"
+        )
+        st.session_state["last_selected_sec_stk"] = sym_inspect
+
     matched_sector = stock_sector_map.get(sym_inspect, "NIFTY_50")
 
     sector_rank_row = ranking_df[ranking_df["sector"] == matched_sector]
@@ -492,11 +601,43 @@ with tab_stocks:
         col_st4.metric("50-Day Signal MA", "🟢 Above (Bullish)" if s_ma else "🔴 Below (Lagging)")
 
         if s_rank <= 3 and s_mrs > 0:
-            st.success(f"🚀 **Strong Sector Tailwinds:** {sym_inspect}'s parent sector `{matched_sector}` is currently in the **Top 3 Leadership** with Mansfield RS of {s_mrs:+.2f}. Breakouts on this stock have institutional confirmation!")
+            st.success(f"🚀 **Strong Sector Tailwinds:** {sym_inspect}'s parent sector `{matched_sector}` is currently in the **Top 3 Leadership** (Rank #{s_rank}) with Mansfield RS of `{s_mrs:+.2f}`. Breakouts on this stock have institutional confirmation!")
         elif s_mrs > 0:
-            st.info(f"🟢 **Positive Sector RS:** `{matched_sector}` is outperforming Nifty 750 (Mansfield RS: {s_mrs:+.2f}).")
+            st.info(f"🟢 **Positive Sector RS:** `{matched_sector}` is outperforming Nifty 750 (Mansfield RS: `{s_mrs:+.2f}`, Rank #{s_rank}). Sector backdrop is supportive.")
         else:
-            st.warning(f"⚠️ **Sector Headwind Alert:** `{matched_sector}` is lagging Nifty 750 (Mansfield RS: {s_mrs:+.2f}, Rank #{s_rank}). Long breakouts may face sector drag.")
+            st.warning(f"⚠️ **Sector Headwind Alert:** `{matched_sector}` is lagging Nifty 750 (Mansfield RS: `{s_mrs:+.2f}`, Rank #{s_rank}). Long breakouts may face sector drag.")
+
+        # Related Sector Peers
+        sector_peers = [s for s, sec in stock_sector_map.items() if sec == matched_sector and s != sym_inspect]
+        if sector_peers:
+            st.markdown(
+                f"**👥 Other F&O Peers in `{matched_sector}` ({len(sector_peers)} stocks):** " +
+                " • ".join([f"`{p}`" for p in sorted(sector_peers)])
+            )
+
+    # Full Universe Stock-to-Sector Reference Expander
+    with st.expander(f"📊 View Complete F&O Universe Stock-to-Sector Alignment Table ({len(all_symbols)} Stocks)"):
+        univ_data = []
+        for s in all_symbols:
+            sec = stock_sector_map.get(s, "NIFTY_50")
+            r_row = ranking_df[ranking_df["sector"] == sec]
+            if not r_row.empty:
+                r_val = r_row.iloc[0]
+                rank_n = int(r_val["rank"])
+                mrs_n = float(r_val["mansfield_rs"])
+                ma_n = "🟢 Bullish" if bool(r_val["above_signal_ma"]) else "🔴 Lagging"
+                tag = "🚀 Top 3 Leader" if (rank_n <= 3 and mrs_n > 0) else ("🟢 Outperforming" if mrs_n > 0 else "🔴 Lagging")
+                univ_data.append({
+                    "Symbol": s,
+                    "Parent Sector": sec,
+                    "Sector Rank": f"#{rank_n}",
+                    "Mansfield RS": round(mrs_n, 2),
+                    "50D Signal MA": ma_n,
+                    "Sector Status": tag
+                })
+        if univ_data:
+            univ_df = pd.DataFrame(univ_data).sort_values(by=["Sector Rank", "Symbol"])
+            st.dataframe(univ_df, width="stretch", height=min(450, 60 + len(univ_df) * 35))
 
 
 # ----------------- TAB 6: CSV INGESTION (BHAVCOPY) -----------------

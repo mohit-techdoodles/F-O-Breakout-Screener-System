@@ -21,6 +21,7 @@ import screener_v2_engine
 import swing_optimization_filters
 import head_and_shoulders_scanner
 import rs_calculator
+import ema_fib_confluence_scanner
 
 importlib.reload(fo_stocks)
 importlib.reload(fibonacci_screener_v2)
@@ -29,6 +30,7 @@ importlib.reload(screener_v2_engine)
 importlib.reload(swing_optimization_filters)
 importlib.reload(head_and_shoulders_scanner)
 importlib.reload(rs_calculator)
+importlib.reload(ema_fib_confluence_scanner)
 
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
@@ -489,6 +491,87 @@ def get_sector_rs_ranking_cached() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_ema_fib_confluence_cached(
+    syms_tuple: tuple,
+    touch_tol: float,
+    min_rvol: float,
+    min_wick_body: float,
+    lookback_bars: int
+) -> pd.DataFrame:
+    daily_cache = st.session_state.get("daily_cache_v2", {})
+    cfg = ema_fib_confluence_scanner.CONFIG.copy()
+    cfg["TOUCH_TOLERANCE_PCT"] = touch_tol
+    cfg["MIN_RVOL"] = min_rvol
+    cfg["MIN_WICK_TO_BODY"] = min_wick_body
+
+    records = []
+    for sym in syms_tuple:
+        df = daily_cache.get(sym)
+        if df is None or not isinstance(df, pd.DataFrame) or len(df) < 200:
+            continue
+        for offset in range(0, max(1, lookback_bars)):
+            sub_df = df.iloc[:-offset] if offset > 0 else df
+            res = ema_fib_confluence_scanner.scan_symbol(sym, sub_df, cfg)
+            if res is not None:
+                m = res["metrics"]
+                ex = res["execution"]
+                fib = res["fib_confluence"]
+                if fib and fib.get("matched_levels"):
+                    top_m = fib["matched_levels"][0]
+                    matched_lvl = top_m["level"]
+                    fib_price = top_m["price"]
+                    dist_pct = top_m["ema_distance_pct"]
+                    inval = fib["invalidation_0786"]
+                    t1 = fib["targets"]["t1_swing"]
+                    t2 = fib["targets"]["t2_ext_1272"]
+                    t3 = fib["targets"]["t3_ext_1618"]
+                    risk = abs(ex["entry_trigger"] - ex["stop_loss"])
+                    reward = abs(t2 - ex["entry_trigger"])
+                    rr = round(reward / risk, 2) if risk > 0 else 0.0
+                else:
+                    matched_lvl = "None"
+                    fib_price = np.nan
+                    dist_pct = np.nan
+                    inval = np.nan
+                    t1 = np.nan
+                    t2 = np.nan
+                    t3 = np.nan
+                    rr = np.nan
+
+                records.append({
+                    "Symbol": sym,
+                    "Direction": res["direction"],
+                    "Setup_Tier": res["setup_tier"],
+                    "Tier_Tag": "⭐ EMA + Fib Cluster" if res["setup_tier"] == "EMA_FIB_CONFLUENCE" else "📌 100 EMA Rejection",
+                    "Close": m["close"],
+                    "EMA_100": m["ema_100"],
+                    "EMA_Slope": m["ema_slope"],
+                    "RVOL": m["rvol"],
+                    "Wick_To_Body": m["wick_to_body"],
+                    "Wick_To_Range%": m["wick_to_range_pct"],
+                    "Entry_Trigger": ex["entry_trigger"],
+                    "Stop_Loss": ex["stop_loss"],
+                    "Matched_Fib": matched_lvl,
+                    "Fib_Price": fib_price,
+                    "EMA_Fib_Dist%": dist_pct,
+                    "Invalidation_0786": inval,
+                    "Target_1": t1,
+                    "Target_2": t2,
+                    "Target_3": t3,
+                    "R_R": rr,
+                    "Bars_Ago": offset,
+                    "Signal_Date": res["date"]
+                })
+                break
+    if not records:
+        return pd.DataFrame()
+    out_df = pd.DataFrame(records)
+    tier_order = {"EMA_FIB_CONFLUENCE": 0, "EMA_ONLY": 1}
+    out_df["tier_sort"] = out_df["Setup_Tier"].map(tier_order)
+    out_df = out_df.sort_values(by=["tier_sort", "RVOL"], ascending=[True, False]).drop(columns=["tier_sort"]).reset_index(drop=True)
+    return out_df
+
 # Refresh Buttons
 c_ref1, c_ref2 = st.sidebar.columns([3, 1])
 with c_ref1:
@@ -497,6 +580,7 @@ with c_ref1:
         get_v2_data.clear()
         get_classical_patterns_cached.clear()
         get_sector_rs_ranking_cached.clear()
+        get_ema_fib_confluence_cached.clear()
 with c_ref2:
     if st.button("⚡ Reset", help="Hard reset all caches including 1Y Daily data"):
         st.cache_data.clear()
@@ -705,6 +789,7 @@ with tab1:
     st.download_button("📥 Export MTF Data (CSV)", csv_data, "mtf_screener_v2.csv", "text/csv")
     st.info("💡 **1-Hour Classical Pattern Alert:** Looking for institutional top and bottom reversals? Head & Shoulders and Inverse H&S formations with dynamic sloped necklines and measured-move targets are actively scanned in **Tab 4 ➔ Part III: 🏛️ 1H Classical Patterns**.")
     st.info("🏛️ **Sector Rotation Alert:** Institutional capital flow & Mansfield Relative Strength across all 13 NSE Sectoral Indices vs Nifty 750 is live in **Page 4 (Sidebar)** and **Tab 5 ➔ Part III: 🏛️ Sector RS vs Nifty 750**.")
+    st.info("⚡ **100-Day EMA & Fib Confluence Alert:** Programmatic detection of standalone 100-day EMA pullbacks and high-conviction 100 EMA + Fib retracement clusters (0.382 / 0.500 / 0.618) is live in **Tab 4 ➔ Part IV: ⚡ 100-Day EMA Rejection & Fib Confluence**.")
 
 
 # =====================================================================
@@ -1057,10 +1142,11 @@ with tab_fib:
     st.markdown("#### 📐 Advanced Fibonacci Retracement & High Beta F&O Confluence Engine")
     st.caption("Module: `Fibonacci_Screener_V2` | Implements Multi-Timeframe (MTF) clustering, Blue Sky extensions, Volume Profile confluence, and institutional price action.")
 
-    f_sub1, f_sub2, f_sub_hs, f_sub3 = st.tabs([
+    f_sub1, f_sub2, f_sub_hs, f_sub_ema, f_sub3 = st.tabs([
         "Part I: Advanced Fibonacci (Points 1-4)",
         "Part II: High Beta F&O Confluences (Points 5-10)",
         "Part III: 🏛️ 1H Classical Patterns: Head & Shoulders & Inverse H&S",
+        "Part IV: ⚡ 100-Day EMA Rejection & Fib Confluence",
         "Full Fibonacci Screener Monitor & CSV Export"
     ])
 
@@ -1282,6 +1368,151 @@ with tab_fib:
             - **Right Shoulder (RS):** Sellers try to push down again but fail to make a lower low, confirming supply exhaustion.
             - **Measured Move Target:** $\text{Target} = \text{Neckline} + (\text{Neckline}_H - H)$
             - **Invalidation & Stop Loss:** Anchored strictly to the Right Shoulder low.
+            """)
+
+    with f_sub_ema:
+        st.markdown("##### Part IV: ⚡ 100-Day EMA Rejection & Fibonacci Confluence Scanner")
+        st.caption("Algorithmic signal detection of standalone 100-day EMA trend pullbacks (EMA_ONLY) and high-conviction 100 EMA + Fibonacci retracement clusters (EMA_FIB_CONFLUENCE: 0.382 / 0.500 / 0.618). Timeframe: Daily (1D OHLCV).")
+
+        # Controls & Filter Row
+        c_ema1, c_ema2, c_ema3, c_ema4, c_ema5 = st.columns([2, 2, 2, 2, 2])
+        with c_ema1:
+            tier_flt = st.selectbox(
+                "🎯 Signal Tier:",
+                ["All Signals", "⭐ EMA + Fib Confluence Only", "📌 100 EMA Rejection Only"],
+                index=0
+            )
+        with c_ema2:
+            dir_flt = st.selectbox(
+                "🧭 Direction:",
+                ["All", "🟢 Bullish Rejection", "🔴 Bearish Rejection"],
+                index=0
+            )
+        with c_ema3:
+            touch_tol_pct = st.slider("EMA Touch Gap %:", 0.2, 2.0, 0.5, 0.1, help="Max distance when low/high reverses near the 100 EMA.")
+        with c_ema4:
+            rvol_thresh = st.slider("Min RVOL (20D):", 0.8, 2.5, 1.2, 0.1, help="Relative volume multiple confirming institutional absorption.")
+        with c_ema5:
+            lookback_sessions = st.selectbox(
+                "⏱️ Session Recency:",
+                ["Today's EOD Session (T-0)", "Last 3 Sessions (T-0 to T-2)", "Last 5 Sessions (T-0 to T-4)"],
+                index=1
+            )
+        
+        lb_bars = 1 if "Today" in lookback_sessions else (3 if "Last 3" in lookback_sessions else 5)
+
+        with st.spinner("Scanning 100-Day EMA Rejections and Fibonacci Confluences across F&O universe..."):
+            ema_results_df = get_ema_fib_confluence_cached(
+                tuple(selected_symbols),
+                touch_tol=touch_tol_pct / 100.0,
+                min_rvol=rvol_thresh,
+                min_wick_body=2.0,
+                lookback_bars=lb_bars
+            )
+
+        # Apply user filters
+        filtered_ema_df = ema_results_df.copy()
+        if not filtered_ema_df.empty:
+            if "EMA + Fib Confluence Only" in tier_flt:
+                filtered_ema_df = filtered_ema_df[filtered_ema_df["Setup_Tier"] == "EMA_FIB_CONFLUENCE"]
+            elif "100 EMA Rejection Only" in tier_flt:
+                filtered_ema_df = filtered_ema_df[filtered_ema_df["Setup_Tier"] == "EMA_ONLY"]
+
+            if "Bullish" in dir_flt:
+                filtered_ema_df = filtered_ema_df[filtered_ema_df["Direction"] == "BULLISH"]
+            elif "Bearish" in dir_flt:
+                filtered_ema_df = filtered_ema_df[filtered_ema_df["Direction"] == "BEARISH"]
+
+        # Metric KPI cards
+        tot_hits = len(filtered_ema_df)
+        conf_hits = int((filtered_ema_df["Setup_Tier"] == "EMA_FIB_CONFLUENCE").sum()) if not filtered_ema_df.empty else 0
+        ema_hits = int((filtered_ema_df["Setup_Tier"] == "EMA_ONLY").sum()) if not filtered_ema_df.empty else 0
+        bull_hits = int((filtered_ema_df["Direction"] == "BULLISH").sum()) if not filtered_ema_df.empty else 0
+        bear_hits = int((filtered_ema_df["Direction"] == "BEARISH").sum()) if not filtered_ema_df.empty else 0
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("⭐ High-Conviction Confluences", conf_hits, "EMA + Fib 0.382/0.500/0.618")
+        k2.metric("📌 Standalone 100 EMA Rejections", ema_hits, "Wick >= 2x Body & >= 50% Range")
+        k3.metric("🟢 Bullish Absorption", bull_hits, "Slope > 0 & Support Rebound")
+        k4.metric("🔴 Bearish Supply", bear_hits, "Slope < 0 & Resistance Rejection")
+
+        if filtered_ema_df.empty:
+            st.info("ℹ️ No symbols currently meet the strict 100-Day EMA rejection and Fibonacci confluence criteria under the chosen parameters. Try adjusting the EMA Touch Gap % or Session Recency above.")
+        else:
+            disp_cols = [
+                "Symbol", "Direction", "Tier_Tag", "Close", "EMA_100", "EMA_Slope", "RVOL",
+                "Wick_To_Body", "Entry_Trigger", "Stop_Loss", "Matched_Fib", "Fib_Price",
+                "EMA_Fib_Dist%", "Target_1", "Target_2", "Target_3", "R_R", "Bars_Ago", "Signal_Date"
+            ]
+            avail_cols = [c for c in disp_cols if c in filtered_ema_df.columns]
+            tbl_df = filtered_ema_df[avail_cols].copy()
+
+            h_ema_tbl = min(500, max(260, 55 + len(tbl_df) * 38))
+            st.dataframe(
+                tbl_df.style.format({
+                    "Close": "₹{:.2f}",
+                    "EMA_100": "₹{:.2f}",
+                    "EMA_Slope": "{:+.2f}",
+                    "RVOL": "{:.2f}x",
+                    "Wick_To_Body": "{:.2f}x",
+                    "Entry_Trigger": "₹{:.2f}",
+                    "Stop_Loss": "₹{:.2f}",
+                    "Fib_Price": "₹{:.2f}",
+                    "EMA_Fib_Dist%": "{:.2f}%",
+                    "Target_1": "₹{:.2f}",
+                    "Target_2": "₹{:.2f}",
+                    "Target_3": "₹{:.2f}",
+                    "R_R": "{:.2f}x"
+                }),
+                width="stretch",
+                height=h_ema_tbl,
+                column_config={
+                    "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                    "Direction": st.column_config.TextColumn("Direction", width="small"),
+                    "Tier_Tag": st.column_config.TextColumn("Signal Tier", width="medium"),
+                    "Close": st.column_config.TextColumn("Close ₹", width="small"),
+                    "EMA_100": st.column_config.TextColumn("100 EMA ₹", width="small"),
+                    "RVOL": st.column_config.TextColumn("RVOL", help="20-day volume relative multiple (>=1.2x confirms institutional absorption).", width="small"),
+                    "Wick_To_Body": st.column_config.TextColumn("Wick/Body", help="Rejection wick to candle body ratio (>=2.0).", width="small"),
+                    "Entry_Trigger": st.column_config.TextColumn("Entry ₹", help="Next-session execution trigger: High for Bullish, Low for Bearish.", width="small"),
+                    "Stop_Loss": st.column_config.TextColumn("Stop Loss ₹", help="Invalidation anchor: Low for Bullish, High for Bearish.", width="small"),
+                    "Matched_Fib": st.column_config.TextColumn("Fib Level", help="Overlapping Fib retracement level (0.382, 0.500, 0.618).", width="small"),
+                    "Target_2": st.column_config.TextColumn("Target 2 (1.272)", help="Primary profit target anchored to 1.272 extension.", width="small"),
+                    "R_R": st.column_config.TextColumn("Risk-Reward", help="Reward-to-Risk ratio to Target 2.", width="small"),
+                    "Bars_Ago": st.column_config.NumberColumn("Bars Ago", format="%d", width="small"),
+                    "Signal_Date": st.column_config.TextColumn("Date", width="small")
+                }
+            )
+
+            # CSV Download
+            csv_ema = tbl_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Export 100-Day EMA & Fib Confluence Setups (CSV)",
+                data=csv_ema,
+                file_name=f"100_EMA_Fib_Confluence_Setups_{base_meta.get('live_date', 'today')}.csv",
+                mime="text/csv",
+                width="stretch"
+            )
+
+        with st.expander("📖 100-Day EMA & Fibonacci Confluence: Technical Rules & Strategy Architecture"):
+            st.markdown(r"""
+            #### 1. Signal Classification Tiers
+            - **EMA_ONLY:** Price pulls back to the 100-day EMA in the direction of the prevailing EMA slope, printing a qualifying rejection wick closing firmly on the trend side.
+            - **EMA_FIB_CONFLUENCE:** High-conviction cluster where the 100-day EMA simultaneously overlaps a key Fibonacci retracement level ($0.382, 0.500, 0.618$) within a $1.5\%$ tolerance.
+
+            #### 2. Rejection Candle Anatomy
+            - **Wick Dominance:** Rejection wick must be $\ge 2.0\times$ the real candle body AND occupy $\ge 50\%$ of the total candle high–low range.
+            - **Volume Confirmation:** Daily Relative Volume (RVOL) $\ge 1.2\times$ baseline 20-day volume average.
+            - **Dual-Close Validation:**
+              - Bullish: $\text{Close}_t > \max(\text{EMA}_t, \text{Fib})$ and strictly above the $0.786$ invalidation level.
+              - Bearish: $\text{Close}_t < \min(\text{EMA}_t, \text{Fib})$ and strictly below the $0.786$ invalidation level.
+
+            #### 3. Execution Levels & Risk Management
+            - **Entry Trigger:** Break of signal candle High (Bullish) or Low (Bearish) on next session.
+            - **Stop Loss:** Anchored strictly to the signal candle Low (Bullish) or High (Bearish).
+            - **Target 1:** Previous swing high/low ($1.0$).
+            - **Target 2:** $1.272$ Fibonacci extension.
+            - **Target 3:** $1.618$ Fibonacci extension.
             """)
 
     with f_sub3:
