@@ -42,13 +42,13 @@ F&O Breakout Screener System/
 ### Option 1: Using the 1-Click Script
 Open Terminal and run:
 ```bash
-cd "/Users/mohitpatel/Desktop/python/F&O Breakout Screener System"
+cd "/********/********/F&O Breakout Screener System"
 ./run.sh
 ```
 
 ### Option 2: Manual Terminal Execution
 ```bash
-cd "/Users/mohitpatel/Desktop/python/F&O Breakout Screener System"
+cd "*********/*********/F&O Breakout Screener System"
 source venv/bin/activate
 streamlit run app.py
 ```
@@ -63,7 +63,7 @@ Streamlit Community Cloud lets you host this app on a public URL for free so you
 ### Step 1: Initialize Git and Commit
 In your terminal:
 ```bash
-cd "/Users/mohitpatel/Desktop/python/F&O Breakout Screener System"
+cd "/*********/*********/F&O Breakout Screener System"
 git init
 git add .
 git commit -m "Initial commit: F&O Breakout Screener"

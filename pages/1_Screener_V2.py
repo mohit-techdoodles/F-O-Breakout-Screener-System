@@ -22,6 +22,7 @@ import swing_optimization_filters
 import head_and_shoulders_scanner
 import rs_calculator
 import ema_fib_confluence_scanner
+import monday_r1_rejection_scanner
 
 importlib.reload(fo_stocks)
 importlib.reload(fibonacci_screener_v2)
@@ -31,6 +32,7 @@ importlib.reload(swing_optimization_filters)
 importlib.reload(head_and_shoulders_scanner)
 importlib.reload(rs_calculator)
 importlib.reload(ema_fib_confluence_scanner)
+importlib.reload(monday_r1_rejection_scanner)
 
 from fo_stocks import TOP_30_LIQUID, NIFTY_50, BANK_NIFTY, get_fo_universe
 from screener_v2_engine import (
@@ -572,6 +574,64 @@ def get_ema_fib_confluence_cached(
     out_df = out_df.sort_values(by=["tier_sort", "RVOL"], ascending=[True, False]).drop(columns=["tier_sort"]).reset_index(drop=True)
     return out_df
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_monday_r1_rejections_cached(
+    syms_tuple: tuple,
+    touch_tol: float,
+    confluence_tol: float,
+    open_at_r1_filter: bool
+) -> pd.DataFrame:
+    daily_cache = st.session_state.get("daily_cache_v2", {})
+    hourly_cache = st.session_state.get("hourly_cache_v2", {})
+    cfg = monday_r1_rejection_scanner.CONFIG.copy()
+    cfg["TOUCH_TOL_PCT"] = touch_tol
+    cfg["CONFLUENCE_TOL_PCT"] = confluence_tol
+    cfg["OPEN_AT_R1_FILTER"] = open_at_r1_filter
+
+    records = []
+    for sym in syms_tuple:
+        df_d = daily_cache.get(sym)
+        if df_d is None or not isinstance(df_d, pd.DataFrame) or len(df_d) < 200:
+            continue
+        
+        # Check hourly cache or fetch 14d 60m data for Monday 1st-hour isolation
+        df_1h = hourly_cache.get(sym)
+        if df_1h is None or not isinstance(df_1h, pd.DataFrame) or df_1h.empty:
+            try:
+                yf_sym = f"{sym}.NS" if not sym.endswith(".NS") else sym
+                df_1h = yf.download(yf_sym, period="14d", interval="60m", auto_adjust=True, progress=False)
+                if "hourly_cache_v2" not in st.session_state:
+                    st.session_state["hourly_cache_v2"] = {}
+                st.session_state["hourly_cache_v2"][sym] = df_1h
+            except Exception:
+                continue
+
+        res = monday_r1_rejection_scanner.scan_monday_r1_from_data(sym, df_d, df_1h, cfg)
+        if res is not None:
+            records.append({
+                "Symbol": res["symbol"],
+                "Monday_Date": res["monday_date"],
+                "Weekly_R1": res["weekly_r1"],
+                "1H_Open": res["1h_open"],
+                "1H_High": res["1h_high"],
+                "1H_Low": res["1h_low"],
+                "1H_Close": res["1h_close"],
+                "Entry_Trigger": res["entry_trigger_below"],
+                "Stop_Loss": res["stop_loss_above"],
+                "Risk_Pts": res["risk_points"],
+                "Risk_%": res["risk_pct"],
+                "Confluence_Count": res["confluence_count"],
+                "Confluences": res["confluences_str"],
+                "Pattern": res["pattern_tag"],
+                "Candle_Time": res["candle_time"]
+            })
+
+    if not records:
+        return pd.DataFrame()
+    out_df = pd.DataFrame(records)
+    out_df = out_df.sort_values(by=["Confluence_Count", "Risk_%"], ascending=[False, True]).reset_index(drop=True)
+    return out_df
+
 # Refresh Buttons
 c_ref1, c_ref2 = st.sidebar.columns([3, 1])
 with c_ref1:
@@ -581,6 +641,7 @@ with c_ref1:
         get_classical_patterns_cached.clear()
         get_sector_rs_ranking_cached.clear()
         get_ema_fib_confluence_cached.clear()
+        get_monday_r1_rejections_cached.clear()
 with c_ref2:
     if st.button("⚡ Reset", help="Hard reset all caches including 1Y Daily data"):
         st.cache_data.clear()
@@ -747,7 +808,7 @@ with sw_col4:
 tab1, tab2, tab3, tab_fib, tab_swing, tab4, tab5 = st.tabs([
     "🎯 Core MTF Breakouts",
     "📊 Volume & F&O Validations",
-    "🔮 Weekly Money Zone Matrix",
+    "🔮 Weekly Money Zone & Monday R1 Rejection",
     "📐 Advanced Fibonacci & Confluence",
     "🚀 High-Conviction Swing (Spec)",
     "📈 Interactive Chart",
@@ -1078,61 +1139,220 @@ with tab2:
 
 
 # =====================================================================
-# TAB 3: WEEKLY PIVOT & MONEY ZONE MATRIX
+# TAB 3: WEEKLY PIVOT, MONEY ZONE & MONDAY R1 REJECTION SCANNER
 # =====================================================================
 with tab3:
-    st.markdown("#### 3. Weekly Pivot & Money Zone Matrix (Forward Watchlist for Upcoming Monday)")
-    st.info("💡 **Execution Matrix:** Forward-looking calculations (run on Friday afternoons / weekends) to generate the high-conviction watchlist for the upcoming week.")
+    st.markdown("#### 3. Weekly Pivot, Money Zone Matrix & Monday R1 Rejection Engine")
+    st.caption("Module: `Weekly_Pivot_Money_Zone` + `Monday_Weekly_R1_Rejection_Scanner` | Forward-looking Friday-for-Monday setups and live Monday opening-hour (09:15-10:15 AM) Weekly R1 institutional resistance rejection scanner.")
 
-    mz_cols = [
-        "Symbol", "LTP", "Next_W_Pivot", "Next_W_High_CPR", "Next_W_Low_CPR", "Next_W_CPR_Width%",
-        "Next_W_Cam_H4", "Next_W_VAH", "Next_W_VAL", "Watchlist_Setups"
-    ]
-    view_mz = all_df[mz_cols].copy() if not all_df.empty else pd.DataFrame(columns=mz_cols)
+    mz_sub1, mz_sub2 = st.tabs([
+        "🔮 Part I: Weekly Pivot & Money Zone Matrix (Forward Watchlist)",
+        "⚡ Part II: Monday Weekly R1 1st-Hour Rejection & Resistance Confluences"
+    ])
 
-    st.dataframe(
-        view_mz.style.format({
-            "LTP": "₹{:.2f}",
-            "Next_W_Pivot": "₹{:.2f}",
-            "Next_W_High_CPR": "₹{:.2f}",
-            "Next_W_Low_CPR": "₹{:.2f}",
-            "Next_W_CPR_Width%": "{:.3f}%",
-            "Next_W_Cam_H4": "₹{:.2f}",
-            "Next_W_VAH": "₹{:.2f}",
-            "Next_W_VAL": "₹{:.2f}"
-        }),
-        width="stretch",
-        height=450
-    )
+    with mz_sub1:
+        st.markdown("##### 🔮 Friday-for-Monday Forward Watchlist (Weekly CPR & Money Zone Matrix)")
+        st.info("💡 **Execution Matrix:** Forward-looking calculations (run on Friday afternoons / weekends) to generate the high-conviction watchlist for the upcoming week.")
 
-    # Strategy breakdown cards
-    st.markdown("---")
-    st.subheader("📋 Monday Strategy Execution Rules")
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        st.markdown("""
-        **🌀 Volatility Squeeze**
-        - **Condition:** Next VAH < Curr VAH & Next VAL > Curr VAL (Inside Value)
-        - **Execution:** 1H close above Weekly R1 / VAH
-        """)
-    with s2:
-        st.markdown("""
-        **🎯 Narrow CPR**
-        - **Condition:** Next CPR Width < 0.5% of LTP
-        - **Execution:** Breakout above High_CPR with RVOL > 1.5
-        """)
-    with s3:
-        st.markdown("""
-        **📈 Trend Continuation**
-        - **Condition:** Next CPR > Curr CPR & Next POC > Curr POC
-        - **Execution:** Pullback to POC/CPR, bounce validated by 15m VWAP crossover
-        """)
-    with s4:
-        st.markdown("""
-        **⚡ Camarilla Alignment**
-        - **Condition:** Weekly Cam H4 within 0.2% of Weekly VAH
-        - **Execution:** LTP crosses H4 + 0.15% buffer
-        """)
+        mz_cols = [
+            "Symbol", "LTP", "Next_W_Pivot", "Next_W_High_CPR", "Next_W_Low_CPR", "Next_W_CPR_Width%",
+            "Next_W_Cam_H4", "Next_W_VAH", "Next_W_VAL", "Watchlist_Setups"
+        ]
+        view_mz = all_df[mz_cols].copy() if not all_df.empty else pd.DataFrame(columns=mz_cols)
+
+        st.dataframe(
+            view_mz.style.format({
+                "LTP": "₹{:.2f}",
+                "Next_W_Pivot": "₹{:.2f}",
+                "Next_W_High_CPR": "₹{:.2f}",
+                "Next_W_Low_CPR": "₹{:.2f}",
+                "Next_W_CPR_Width%": "{:.3f}%",
+                "Next_W_Cam_H4": "₹{:.2f}",
+                "Next_W_VAH": "₹{:.2f}",
+                "Next_W_VAL": "₹{:.2f}"
+            }),
+            width="stretch",
+            height=450
+        )
+
+        # Strategy breakdown cards
+        st.markdown("---")
+        st.subheader("📋 Monday Strategy Execution Rules")
+        s1, s2, s3, s4 = st.columns(4)
+        with s1:
+            st.markdown("""
+            **🌀 Volatility Squeeze**
+            - **Condition:** Next VAH < Curr VAH & Next VAL > Curr VAL (Inside Value)
+            - **Execution:** 1H close above Weekly R1 / VAH
+            """)
+        with s2:
+            st.markdown("""
+            **🎯 Narrow CPR**
+            - **Condition:** Next CPR Width < 0.5% of LTP
+            - **Execution:** Breakout above High_CPR with RVOL > 1.5
+            """)
+        with s3:
+            st.markdown("""
+            **📈 Trend Continuation**
+            - **Condition:** Next CPR > Curr CPR & Next POC > Curr POC
+            - **Execution:** Pullback to POC/CPR, bounce validated by 15m VWAP crossover
+            """)
+        with s4:
+            st.markdown("""
+            **⚡ Camarilla Alignment**
+            - **Condition:** Weekly Cam H4 within 0.2% of Weekly VAH
+            - **Execution:** LTP crosses H4 + 0.15% buffer
+            """)
+
+    with mz_sub2:
+        st.markdown("##### ⚡ Monday Weekly R1 1st-Hour (09:15–10:15 AM IST) Rejection & Resistance Confluence Scanner")
+        st.caption("Module: `Monday_R1_Rejection_Scanner` | Combines Weekly R1 with Monday opening-hour candle action. Detects bearish rejections at R1 and clusters 8 secondary resistance levels (PWH, PDH, Cam H3/H4, Monthly PP/R1, 100/200 EMAs) within a $\le 0.75\%$ band.")
+
+        # Controls
+        col_mr1, col_mr2, col_mr3 = st.columns([1, 1, 1])
+        with col_mr1:
+            touch_tol_pct = st.slider(
+                "Touch Tolerance % (Section 2)",
+                min_value=0.05,
+                max_value=1.00,
+                value=0.20,
+                step=0.05,
+                help="Allowable shortfall below Weekly R1 when 1st-hour high reverses just shy of exact touch (default 0.2%)."
+            ) / 100.0
+        with col_mr2:
+            conf_tol_pct = st.slider(
+                "Confluence Band % (Section 2)",
+                min_value=0.25,
+                max_value=2.00,
+                value=0.75,
+                step=0.05,
+                help="Maximum percentage band around Weekly R1 within which secondary resistances qualify as a confluence cluster."
+            ) / 100.0
+        with col_mr3:
+            gap_filter = st.toggle(
+                "Strict Open >= R1 Filter",
+                value=False,
+                help="Section 7: Restricts signals strictly to stocks that opened right at or above Weekly R1 (Open >= R1 * 0.995)."
+            )
+
+        # Call cached scanner
+        mr1_df = get_monday_r1_rejections_cached(
+            tuple(selected_symbols),
+            touch_tol_pct,
+            conf_tol_pct,
+            gap_filter
+        )
+
+        # KPI row
+        k1, k2, k3, k4 = st.columns(4)
+        with k1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-lbl">Total Rejection Setups</div>
+                <div class="metric-val" style="color: #FF5252;">{len(mr1_df)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k2:
+            multi_conf_count = int((mr1_df["Confluence_Count"] >= 2).sum()) if not mr1_df.empty else 0
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-lbl">Multi-Confluence (≥ 2)</div>
+                <div class="metric-val" style="color: #FFD54F;">{multi_conf_count}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k3:
+            max_conf = int(mr1_df["Confluence_Count"].max()) if not mr1_df.empty else 0
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-lbl">Top Confluence Count</div>
+                <div class="metric-val" style="color: #00E5FF;">{max_conf} Levels</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-lbl">Execution Run Window</div>
+                <div class="metric-val" style="font-size: 1.15rem; color: #AB47BC; padding-top: 8px;">Mondays ≥ 10:16 AM</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if not mr1_df.empty:
+            # Search filter
+            search_mr1 = st.text_input("🔍 Search Symbol or Confluence Level in Monday Rejections:", "").strip().upper()
+            filtered_mr1 = mr1_df
+            if search_mr1:
+                filtered_mr1 = filtered_mr1[
+                    filtered_mr1["Symbol"].str.contains(search_mr1) |
+                    filtered_mr1["Confluences"].str.upper().str.contains(search_mr1)
+                ]
+
+            h_mr1_tbl = min(500, max(260, 55 + len(filtered_mr1) * 38))
+            st.dataframe(
+                filtered_mr1.style.format({
+                    "Weekly_R1": "₹{:.2f}",
+                    "1H_Open": "₹{:.2f}",
+                    "1H_High": "₹{:.2f}",
+                    "1H_Low": "₹{:.2f}",
+                    "1H_Close": "₹{:.2f}",
+                    "Entry_Trigger": "₹{:.2f}",
+                    "Stop_Loss": "₹{:.2f}",
+                    "Risk_Pts": "₹{:.2f}",
+                    "Risk_%": "{:.2f}%"
+                }),
+                width="stretch",
+                height=h_mr1_tbl,
+                column_config={
+                    "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                    "Monday_Date": st.column_config.TextColumn("Monday Date", width="small"),
+                    "Weekly_R1": st.column_config.TextColumn("Weekly R1", width="small"),
+                    "1H_Close": st.column_config.TextColumn("1H Close", width="small"),
+                    "Entry_Trigger": st.column_config.TextColumn("Entry (< 1H Low)", help="Short breakdown execution trigger: Sell below Monday's 1st-hour low.", width="small"),
+                    "Stop_Loss": st.column_config.TextColumn("Stop Loss (> 1H High)", help="Protective invalidation anchor: Stop-loss above Monday's 1st-hour high.", width="small"),
+                    "Risk_%": st.column_config.TextColumn("Risk %", width="small"),
+                    "Confluence_Count": st.column_config.NumberColumn("Confluences", help="Number of secondary resistance levels within tolerance band.", width="small"),
+                    "Confluences": st.column_config.TextColumn("Overlapping Resistances", help="List of overlapping resistance levels (PWH, PDH, Cam H3/H4, Monthly PP/R1, EMA 100/200) ordered closest first.", width="large"),
+                    "Pattern": st.column_config.TextColumn("Rejection Anatomy", width="medium"),
+                    "Candle_Time": st.column_config.TextColumn("1H Candle Time (IST)", width="medium")
+                }
+            )
+
+            # CSV Download
+            csv_mr1 = filtered_mr1.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Export Monday Weekly R1 Rejection Setups (CSV)",
+                data=csv_mr1,
+                file_name=f"Monday_Weekly_R1_Rejections_{base_meta.get('live_date', 'today')}.csv",
+                mime="text/csv",
+                width="stretch"
+            )
+        else:
+            st.info("ℹ️ No Monday Weekly R1 Rejection setups detected for the current filter criteria and selected universe. (Scanner evaluates the 09:15–10:15 AM IST hourly candle on Mondays).")
+
+        # Developer documentation expander
+        with st.expander("📖 Developer Documentation: Monday Weekly R1 1st-Hour Rejection & Resistance Confluence Architecture"):
+            st.markdown(r"""
+            #### 1. System Overview & Strict No-Lookahead Guarantee
+            - **Run Window:** Mondays at/after 10:16 AM IST once the 09:15–10:15 AM 60-minute candle is finalized.
+            - **Strict No-Lookahead Guarantee:** All pivot, swing, and moving-average levels are computed strictly prior to Monday (`date < target_monday.date()`). Monthly pivots further filter for prior completed month (`to_period("M") < target_monday.to_period("M")`).
+
+            #### 2. Multi-Timeframe Resistance Calculations (9 Derived Levels)
+            - **Weekly R1 (Primary Anchor):** $P_w = (H_w + L_w + C_w) / 3$; $R_1 = 2 P_w - L_w$.
+            - **PWH (Structural Supply):** Previous completed week High ($H_w$).
+            - **PDH (Short-Term Resistance):** Previous trading day High (Friday).
+            - **Weekly Camarilla H3 & H4:** $C_w + (R_w \times 1.1 / 4)$ and $C_w + (R_w \times 1.1 / 2)$.
+            - **Monthly Pivot & R1:** Prior completed month Macro Pivot $(H_m + L_m + C_m) / 3$ and $2 \times \text{PP}_m - L_m$.
+            - **100-Day & 200-Day Daily EMAs:** Exponential moving averages computed on daily closes (`adjust=False`).
+
+            #### 3. Core Rejection Criteria (All 3 Must Pass)
+            1. **Test or Pierce Weekly R1:** $H \ge \text{Weekly\_R1} \times (1 - \text{TOUCH\_TOL\_PCT})$ (default $0.2\%$).
+            2. **Close Below Weekly R1:** $C < \text{Weekly\_R1}$.
+            3. **Bearish Rejection Structure:** Red candle ($C < O$) OR upper rejection wick $\ge$ real body ($H - \max(O,C) \ge |C-O|$).
+
+            #### 4. Execution Levels & Confluence Clustering
+            - **Short Breakdown Entry Trigger:** Below Monday's 1st-hour low ($L$).
+            - **Protective Stop Loss:** Above Monday's 1st-hour high ($H$).
+            - **Confluence Condition:** $|V - \text{Weekly\_R1}| / \text{Weekly\_R1} \le 0.75\%$. Setups are ranked by `confluence_count` descending so the tightest institutional clusters appear first.
+            """)
 
 
 # =====================================================================

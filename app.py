@@ -19,6 +19,7 @@ import volume_profile
 import quantitative_filters
 import mtf_breakout
 import fibonacci_engine
+import monday_r1_rejection_scanner
 
 importlib.reload(fo_stocks)
 importlib.reload(volume_profile)
@@ -28,6 +29,7 @@ importlib.reload(mtf_breakout)
 importlib.reload(fibonacci_engine)
 importlib.reload(screener_engine)
 importlib.reload(chart_utils)
+importlib.reload(monday_r1_rejection_scanner)
 
 from fo_stocks import VERIFIED_FO_STOCKS, NIFTY_50, BANK_NIFTY, TOP_30_LIQUID, get_fo_universe
 from screener_engine import (
@@ -591,7 +593,7 @@ tab1, tab2, tab_mtf, tab_fib, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     f"🔻 Bearish Breakdowns ({len(bear_df)})", 
     f"🎯 MTF Breakouts ({mtf_total_count})",
     f"📐 Fibonacci & Targets ({meta.get('fib_gp_confluence_count', 0)})",
-    f"🌅 Tomorrow's CPR Watchlist ({meta.get('next_narrow_cpr_count', 0)})",
+    f"🌅 Tomorrow's CPR & Monday R1 ({meta.get('next_narrow_cpr_count', 0)})",
     f"🌀 Squeeze Radar ({len(squeeze_df)})",
     "📈 Interactive Chart & Visualizer", 
     f"📋 All F&O Monitor ({len(all_df)})",
@@ -1059,106 +1061,215 @@ with tab_fib:
     )
 
 
-# ----------------- TAB 3: TOMORROW'S CPR WATCHLIST (POST-MARKET PRE-PLANNER) -----------------
+# ----------------- TAB 3: TOMORROW'S CPR & MONDAY R1 REJECTIONS -----------------
 with tab3:
-    st.subheader(f"🌅 Tomorrow's CPR & Camarilla Watchlist (Planning for {meta.get('live_date', 'Next Session')})")
-    st.markdown(f"""
-    > **Post-Market Determinism:**  
-    > Because today's market session has completed, today's High, Low, and Close define **tomorrow's institutional CPR and Camarilla levels with 100% certainty**.  
-    > *Use this pre-market radar every evening (after 3:30 PM IST) to identify which stocks will have **Ultra Narrow CPR** tomorrow. These stocks have the highest probability of explosive trending breakouts when tomorrow's opening bell rings.*
-    """)
+    tab3_sub1, tab3_sub2 = st.tabs([
+        f"🌅 Part I: Tomorrow's CPR Watchlist ({meta.get('next_narrow_cpr_count', 0)})",
+        "⚡ Part II: Monday Weekly R1 1st-Hour Rejection & Resistance Confluences"
+    ])
 
-    # Controls inside Tab 3
-    cpr_col1, cpr_col2, cpr_col3 = st.columns([2, 2, 2])
-    with cpr_col1:
-        only_narrow_tomorrow = st.checkbox("🎯 Show Only Tomorrow's Narrow CPR (≤ 0.35%)", value=False)
-    with cpr_col2:
-        cpr_type_filter = st.selectbox(
-            "Filter by Tomorrow's CPR Classification",
-            ["All", "🎯 Ultra Narrow (≤ 0.15%)", "⚡ Narrow (≤ 0.35%)", "Average", "Wide"],
-            index=0
-        )
-    with cpr_col3:
-        sort_choice = st.selectbox("Sort Order", ["Tightest CPR First (Ascending)", "Widest CPR First (Descending)"], index=0)
+    with tab3_sub1:
+        st.subheader(f"🌅 Tomorrow's CPR & Camarilla Watchlist (Planning for {meta.get('live_date', 'Next Session')})")
+        st.markdown(f"""
+        > **Post-Market Determinism:**  
+        > Because today's market session has completed, today's High, Low, and Close define **tomorrow's institutional CPR and Camarilla levels with 100% certainty**.  
+        > *Use this pre-market radar every evening (after 3:30 PM IST) to identify which stocks will have **Ultra Narrow CPR** tomorrow. These stocks have the highest probability of explosive trending breakouts when tomorrow's opening bell rings.*
+        """)
 
-    # Filter dataframe
-    t_df = all_df.copy()
-    if only_narrow_tomorrow:
-        t_df = t_df[t_df["Next_Is_Narrow"]]
-    
-    if cpr_type_filter == "🎯 Ultra Narrow (≤ 0.15%)":
-        t_df = t_df[t_df["Next_CPR_Type"] == "🎯 Ultra Narrow"]
-    elif cpr_type_filter == "⚡ Narrow (≤ 0.35%)":
-        t_df = t_df[t_df["Next_CPR_Type"] == "⚡ Narrow"]
-    elif cpr_type_filter == "Average":
-        t_df = t_df[t_df["Next_CPR_Type"] == "Average"]
-    elif cpr_type_filter == "Wide":
-        t_df = t_df[t_df["Next_CPR_Type"] == "Wide"]
+        # Controls inside Tab 3
+        cpr_col1, cpr_col2, cpr_col3 = st.columns([2, 2, 2])
+        with cpr_col1:
+            only_narrow_tomorrow = st.checkbox("🎯 Show Only Tomorrow's Narrow CPR (≤ 0.35%)", value=False)
+        with cpr_col2:
+            cpr_type_filter = st.selectbox(
+                "Filter by Tomorrow's CPR Classification",
+                ["All", "🎯 Ultra Narrow (≤ 0.15%)", "⚡ Narrow (≤ 0.35%)", "Average", "Wide"],
+                index=0
+            )
+        with cpr_col3:
+            sort_choice = st.selectbox("Sort Order", ["Tightest CPR First (Ascending)", "Widest CPR First (Descending)"], index=0)
 
-    is_asc = (sort_choice == "Tightest CPR First (Ascending)")
-    t_df = t_df.sort_values(by="Next_CPR_Width%", ascending=is_asc).reset_index(drop=True)
+        # Filter dataframe
+        t_df = all_df.copy()
+        if only_narrow_tomorrow:
+            t_df = t_df[t_df["Next_Is_Narrow"]]
+        
+        if cpr_type_filter == "🎯 Ultra Narrow (≤ 0.15%)":
+            t_df = t_df[t_df["Next_CPR_Type"] == "🎯 Ultra Narrow"]
+        elif cpr_type_filter == "⚡ Narrow (≤ 0.35%)":
+            t_df = t_df[t_df["Next_CPR_Type"] == "⚡ Narrow"]
+        elif cpr_type_filter == "Average":
+            t_df = t_df[t_df["Next_CPR_Type"] == "Average"]
+        elif cpr_type_filter == "Wide":
+            t_df = t_df[t_df["Next_CPR_Type"] == "Wide"]
 
-    # Quick metric summary
-    n_ultra = int((all_df["Next_CPR_Type"] == "🎯 Ultra Narrow").sum())
-    n_narrow = int((all_df["Next_CPR_Type"] == "⚡ Narrow").sum())
-    n_avg = int((all_df["Next_CPR_Type"] == "Average").sum())
-    n_wide = int((all_df["Next_CPR_Type"] == "Wide").sum())
+        is_asc = (sort_choice == "Tightest CPR First (Ascending)")
+        t_df = t_df.sort_values(by="Next_CPR_Width%", ascending=is_asc).reset_index(drop=True)
 
-    sm1, sm2, sm3, sm4 = st.columns(4)
-    sm1.metric("🎯 Ultra Narrow (≤ 0.15%)", f"{n_ultra} Stocks", "Highest Trend Probability")
-    sm2.metric("⚡ Narrow (≤ 0.35%)", f"{n_narrow} Stocks", "Trending Potential")
-    sm3.metric("Average (0.35% - 0.70%)", f"{n_avg} Stocks", "Normal Volatility")
-    sm4.metric("Wide (> 0.70%)", f"{n_wide} Stocks", "Range-bound / Sideways")
+        # Quick metric summary
+        n_ultra = int((all_df["Next_CPR_Type"] == "🎯 Ultra Narrow").sum())
+        n_narrow = int((all_df["Next_CPR_Type"] == "⚡ Narrow").sum())
+        n_avg = int((all_df["Next_CPR_Type"] == "Average").sum())
+        n_wide = int((all_df["Next_CPR_Type"] == "Wide").sum())
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        sm1, sm2, sm3, sm4 = st.columns(4)
+        sm1.metric("🎯 Ultra Narrow (≤ 0.15%)", f"{n_ultra} Stocks", "Highest Trend Probability")
+        sm2.metric("⚡ Narrow (≤ 0.35%)", f"{n_narrow} Stocks", "Trending Potential")
+        sm3.metric("Average (0.35% - 0.70%)", f"{n_avg} Stocks", "Normal Volatility")
+        sm4.metric("Wide (> 0.70%)", f"{n_wide} Stocks", "Range-bound / Sideways")
 
-    if t_df.empty:
-        st.info("No stocks match the selected Tomorrow CPR filter.")
-    else:
-        disp_tomorrow = t_df[[
-            "Symbol", "LTP", "Chg%", "Next_CPR_Type", "Next_CPR_Width%", "Next_CPR_Top", 
-            "Next_CPR_Pivot", "Next_CPR_Bottom", "Next_Cam_H4", "Next_Cam_L4", "RVOL", "BBW_Contract_Status"
-        ]].copy()
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        disp_tomorrow = disp_tomorrow.rename(columns={
-            "LTP": "Today Close / LTP (₹)",
-            "Chg%": "Today Chg %",
-            "Next_CPR_Type": "Tomorrow CPR Type",
-            "Next_CPR_Width%": "Tomorrow CPR Width %",
-            "Next_CPR_Top": "Tomorrow CPR Top (₹)",
-            "Next_CPR_Pivot": "Tomorrow Pivot (₹)",
-            "Next_CPR_Bottom": "Tomorrow CPR Bot (₹)",
-            "Next_Cam_H4": "Tomorrow Cam H4 (₹)",
-            "Next_Cam_L4": "Tomorrow Cam L4 (₹)",
-            "RVOL": "Today RVOL",
-            "BBW_Contract_Status": "BBW Contraction"
-        })
+        if t_df.empty:
+            st.info("No stocks match the selected Tomorrow CPR filter.")
+        else:
+            disp_tomorrow = t_df[[
+                "Symbol", "LTP", "Chg%", "Next_CPR_Type", "Next_CPR_Width%", "Next_CPR_Top", 
+                "Next_CPR_Pivot", "Next_CPR_Bottom", "Next_Cam_H4", "Next_Cam_L4", "RVOL", "BBW_Contract_Status"
+            ]].copy()
 
-        h_tomorrow = min(500, max(260, 55 + len(disp_tomorrow) * 36))
-        st.dataframe(
-            disp_tomorrow.style.format({
-                "Today Close / LTP (₹)": "₹{:.2f}",
-                "Today Chg %": "{:+.2f}%",
-                "Tomorrow CPR Width %": "{:.3f}%",
-                "Tomorrow CPR Top (₹)": "₹{:.2f}",
-                "Tomorrow Pivot (₹)": "₹{:.2f}",
-                "Tomorrow CPR Bot (₹)": "₹{:.2f}",
-                "Tomorrow Cam H4 (₹)": "₹{:.2f}",
-                "Tomorrow Cam L4 (₹)": "₹{:.2f}",
-                "Today RVOL": "{:.2f}x"
-            }),
-            **get_width_kw(st.dataframe),
-            height=h_tomorrow,
-            hide_index=True
-        )
+            disp_tomorrow = disp_tomorrow.rename(columns={
+                "LTP": "Today Close / LTP (₹)",
+                "Chg%": "Today Chg %",
+                "Next_CPR_Type": "Tomorrow CPR Type",
+                "Next_CPR_Width%": "Tomorrow CPR Width %",
+                "Next_CPR_Top": "Tomorrow CPR Top (₹)",
+                "Next_CPR_Pivot": "Tomorrow Pivot (₹)",
+                "Next_CPR_Bottom": "Tomorrow CPR Bot (₹)",
+                "Next_Cam_H4": "Tomorrow Cam H4 (₹)",
+                "Next_Cam_L4": "Tomorrow Cam L4 (₹)",
+                "RVOL": "Today RVOL",
+                "BBW_Contract_Status": "BBW Contraction"
+            })
 
-        csv_tomorrow = disp_tomorrow.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Tomorrow's CPR Levels as CSV",
-            data=csv_tomorrow,
-            file_name=f"tomorrow_cpr_levels_{meta.get('live_date', 'tomorrow')}.csv",
-            mime="text/csv"
-        )
+            h_tomorrow = min(500, max(260, 55 + len(disp_tomorrow) * 36))
+            st.dataframe(
+                disp_tomorrow.style.format({
+                    "Today Close / LTP (₹)": "₹{:.2f}",
+                    "Today Chg %": "{:+.2f}%",
+                    "Tomorrow CPR Width %": "{:.3f}%",
+                    "Tomorrow CPR Top (₹)": "₹{:.2f}",
+                    "Tomorrow Pivot (₹)": "₹{:.2f}",
+                    "Tomorrow CPR Bot (₹)": "₹{:.2f}",
+                    "Tomorrow Cam H4 (₹)": "₹{:.2f}",
+                    "Tomorrow Cam L4 (₹)": "₹{:.2f}",
+                    "Today RVOL": "{:.2f}x"
+                }),
+                **get_width_kw(st.dataframe),
+                height=h_tomorrow,
+                hide_index=True
+            )
+
+            csv_tomorrow = disp_tomorrow.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Tomorrow's CPR Levels as CSV",
+                data=csv_tomorrow,
+                file_name=f"tomorrow_cpr_levels_{meta.get('live_date', 'tomorrow')}.csv",
+                mime="text/csv"
+            )
+
+    with tab3_sub2:
+        st.subheader("⚡ Monday Weekly R1 1st-Hour Rejection & Resistance Confluence Scanner")
+        st.caption("Module: `Monday_R1_Rejection_Scanner` | Detects opening-hour (09:15-10:15 AM IST) bearish rejections at Weekly R1 and clusters 8 secondary resistance levels (PWH, PDH, Cam H3/H4, Monthly PP/R1, 100/200 EMAs) within a $\le 0.75\%$ band.")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            t_tol = st.slider("Touch Tolerance %", 0.05, 1.00, 0.20, 0.05, key="app_touch_tol") / 100.0
+        with c2:
+            c_tol = st.slider("Confluence Band %", 0.25, 2.00, 0.75, 0.05, key="app_conf_tol") / 100.0
+        with c3:
+            g_flt = st.toggle("Strict Open >= R1 Filter", value=False, key="app_gap_filter")
+
+        cfg_app = monday_r1_rejection_scanner.CONFIG.copy()
+        cfg_app["TOUCH_TOL_PCT"] = t_tol
+        cfg_app["CONFLUENCE_TOL_PCT"] = c_tol
+        cfg_app["OPEN_AT_R1_FILTER"] = g_flt
+
+        # Evaluate against daily cache and hourly data
+        d_cache = meta.get("daily_cache", {})
+        h_cache = st.session_state.get("hourly_cache_v2", {})
+        mr1_rows = []
+        for sym in selected_symbols:
+            df_d = d_cache.get(sym)
+            if df_d is None or not isinstance(df_d, pd.DataFrame) or len(df_d) < 200:
+                continue
+            df_1h = h_cache.get(sym)
+            if df_1h is None or not isinstance(df_1h, pd.DataFrame) or df_1h.empty:
+                try:
+                    yf_sym = f"{sym}.NS" if not sym.endswith(".NS") else sym
+                    df_1h = yf.download(yf_sym, period="14d", interval="60m", auto_adjust=True, progress=False)
+                    if "hourly_cache_v2" not in st.session_state:
+                        st.session_state["hourly_cache_v2"] = {}
+                    st.session_state["hourly_cache_v2"][sym] = df_1h
+                except Exception:
+                    continue
+            res = monday_r1_rejection_scanner.scan_monday_r1_from_data(sym, df_d, df_1h, cfg_app)
+            if res is not None:
+                mr1_rows.append({
+                    "Symbol": res["symbol"],
+                    "Monday_Date": res["monday_date"],
+                    "Weekly_R1": res["weekly_r1"],
+                    "1H_Open": res["1h_open"],
+                    "1H_High": res["1h_high"],
+                    "1H_Low": res["1h_low"],
+                    "1H_Close": res["1h_close"],
+                    "Entry_Trigger": res["entry_trigger_below"],
+                    "Stop_Loss": res["stop_loss_above"],
+                    "Risk_%": res["risk_pct"],
+                    "Confluences": res["confluence_count"],
+                    "Overlapping_Levels": res["confluences_str"],
+                    "Pattern": res["pattern_tag"]
+                })
+
+        if mr1_rows:
+            mr1_app_df = pd.DataFrame(mr1_rows).sort_values(by=["Confluences", "Risk_%"], ascending=[False, True]).reset_index(drop=True)
+            st.dataframe(
+                mr1_app_df.style.format({
+                    "Weekly_R1": "₹{:.2f}",
+                    "1H_Open": "₹{:.2f}",
+                    "1H_High": "₹{:.2f}",
+                    "1H_Low": "₹{:.2f}",
+                    "1H_Close": "₹{:.2f}",
+                    "Entry_Trigger": "₹{:.2f}",
+                    "Stop_Loss": "₹{:.2f}",
+                    "Risk_%": "{:.2f}%"
+                }),
+                **get_width_kw(st.dataframe),
+                height=min(450, 55 + len(mr1_app_df) * 36)
+            )
+            st.download_button(
+                "📥 Download Monday Weekly R1 Rejections CSV",
+                data=mr1_app_df.to_csv(index=False).encode("utf-8"),
+                file_name="monday_weekly_r1_rejections.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("ℹ️ No Monday Weekly R1 Rejection setups detected for the current filter criteria and selected universe.")
+
+        with st.expander("📖 Developer Documentation: Monday Weekly R1 1st-Hour Rejection & Resistance Confluence Architecture"):
+            st.markdown(r"""
+            #### 1. System Overview & Strict No-Lookahead Guarantee
+            - **Run Window:** Mondays at/after 10:16 AM IST once the 09:15–10:15 AM 60-minute candle is finalized.
+            - **Strict No-Lookahead Guarantee:** All pivot, swing, and moving-average levels are computed strictly prior to Monday (`date < target_monday.date()`). Monthly pivots further filter for prior completed month (`to_period("M") < target_monday.to_period("M")`).
+
+            #### 2. Multi-Timeframe Resistance Calculations (9 Derived Levels)
+            - **Weekly R1 (Primary Anchor):** $P_w = (H_w + L_w + C_w) / 3$; $R_1 = 2 P_w - L_w$.
+            - **PWH (Structural Supply):** Previous completed week High ($H_w$).
+            - **PDH (Short-Term Resistance):** Previous trading day High (Friday).
+            - **Weekly Camarilla H3 & H4:** $C_w + (R_w \times 1.1 / 4)$ and $C_w + (R_w \times 1.1 / 2)$.
+            - **Monthly Pivot & R1:** Prior completed month Macro Pivot $(H_m + L_m + C_m) / 3$ and $2 \times \text{PP}_m - L_m$.
+            - **100-Day & 200-Day Daily EMAs:** Exponential moving averages computed on daily closes (`adjust=False`).
+
+            #### 3. Core Rejection Criteria (All 3 Must Pass)
+            1. **Test or Pierce Weekly R1:** $H \ge \text{Weekly\_R1} \times (1 - \text{TOUCH\_TOL\_PCT})$ (default $0.2\%$).
+            2. **Close Below Weekly R1:** $C < \text{Weekly\_R1}$.
+            3. **Bearish Rejection Structure:** Red candle ($C < O$) OR upper rejection wick $\ge$ real body ($H - \max(O,C) \ge |C-O|$).
+
+            #### 4. Execution Levels & Confluence Clustering
+            - **Short Breakdown Entry Trigger:** Below Monday's 1st-hour low ($L$).
+            - **Protective Stop Loss:** Above Monday's 1st-hour high ($H$).
+            - **Confluence Condition:** $|V - \text{Weekly\_R1}| / \text{Weekly\_R1} \le 0.75\%$. Setups are ranked by `confluence_count` descending.
+            """)
 
 
 # ----------------- TAB 4: SQUEEZE RADAR (PRE-BREAKOUT WATCHLIST) -----------------

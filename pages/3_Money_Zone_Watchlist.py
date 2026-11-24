@@ -43,6 +43,7 @@ from screener_v2_engine import (
     ensure_decimal_columns
 )
 import swing_optimization_filters
+import monday_r1_rejection_scanner
 from pwa_launcher import inject_pwa_headers, render_app_launcher_sidebar
 
 # ----------------- Streamlit Page Configuration -----------------
@@ -616,12 +617,55 @@ categories_data[15] = {
 }
 
 
+# 16. Monday Weekly R1 1st-Hour Rejection & Resistance Confluences
+mr1_records = []
+d_1y_dict = base_meta.get("daily_cache") or get_daily_1y_data_cached(selected_symbols) or {}
+for sym in selected_symbols:
+    df_d = d_1y_dict.get(sym)
+    if df_d is not None and isinstance(df_d, pd.DataFrame) and len(df_d) >= 200:
+        df_1h = st.session_state.get("hourly_cache_v2", {}).get(sym)
+        if df_1h is not None and isinstance(df_1h, pd.DataFrame) and not df_1h.empty:
+            res = monday_r1_rejection_scanner.scan_monday_r1_from_data(sym, df_d, df_1h)
+            if res is not None:
+                mr1_records.append({
+                    "Symbol": res["symbol"],
+                    "LTP": res["1h_close"],
+                    "Weekly_R1": res["weekly_r1"],
+                    "1H_High": res["1h_high"],
+                    "Entry_Trigger": res["entry_trigger_below"],
+                    "Stop_Loss": res["stop_loss_above"],
+                    "Risk_%": res["risk_pct"],
+                    "Confluences": res["confluence_count"],
+                    "Overlapping_Levels": res["confluences_str"],
+                    "Pattern": res["pattern_tag"]
+                })
+df_cat16 = pd.DataFrame(mr1_records) if mr1_records else pd.DataFrame(columns=[
+    "Symbol", "LTP", "Weekly_R1", "1H_High", "Entry_Trigger", "Stop_Loss", "Risk_%", "Confluences", "Overlapping_Levels", "Pattern"
+])
+categories_data[16] = {
+    "num": 16,
+    "icon": "⚡",
+    "name": "Setup 5: Monday Weekly R1 1st-Hour Rejection & Resistance Confluence",
+    "group": "Part II: Weekly Pivot & Money Zone Matrix",
+    "desc": "Intraday Multi-Timeframe Scanner: Detects Monday opening-hour (09:15-10:15 AM) bearish rejections at Weekly R1 clustering with secondary resistance levels (PWH, PDH, Cam H3/H4, Monthly PP/R1, 100/200 EMAs) within <= 0.75%. Short trigger below 1H Low, Stop-loss above 1H High.",
+    "df": df_cat16,
+    "display_cols": [
+        "Symbol", "LTP", "Weekly_R1", "1H_High", "Entry_Trigger", "Stop_Loss", "Risk_%",
+        "Confluences", "Overlapping_Levels", "Pattern"
+    ],
+    "fmt": {
+        "LTP": "₹{:.2f}", "Weekly_R1": "₹{:.2f}", "1H_High": "₹{:.2f}",
+        "Entry_Trigger": "₹{:.2f}", "Stop_Loss": "₹{:.2f}", "Risk_%": "{:.2f}%"
+    }
+}
+
+
 # =====================================================================
 # MAIN PAGE HEADER & CONTROLS
 # =====================================================================
 st.title("🔮 Money Zone & Derivatives Watchlist Monitor")
 st.markdown(
-    f"Dedicated list view tracking all **{len(raw_df)}** scanned F&O stocks classified across **15 core Money Zone, "
+    f"Dedicated list view tracking all **{len(raw_df)}** scanned F&O stocks classified across **{len(categories_data)} core Money Zone, "
     f"Breakout, Volume, Derivatives & 0.70/0.75 Range Position categories**."
 )
 
